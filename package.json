@@ -23,7 +23,7 @@
     "electron",
     "freelance"
   ],
-  "author": "ambashtalk",
+  "author": "ambashtalk <ambashtalk@gmail.com>",
   "license": "ISC",
   "build": {
     "appId": "com.ambashtalk.prism-invoice",
@@ -58,6 +58,7 @@
         "deb",
         "rpm"
       ],
+      "maintainer": "ambashtalk <ambashtalk@gmail.com>",
       "category": "Office"
     }
   },
