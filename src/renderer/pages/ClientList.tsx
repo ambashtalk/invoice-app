@@ -1,0 +1,261 @@
+import { useState, useEffect } from 'react'
+
+interface Client {
+    uuid: string
+    name: string
+    email: string | null
+    address: string | null
+    gstin: string | null
+}
+
+export default function ClientList() {
+    const [clients, setClients] = useState<Client[]>([])
+    const [loading, setLoading] = useState(true)
+    const [showForm, setShowForm] = useState(false)
+    const [editingClient, setEditingClient] = useState<Client | null>(null)
+    const [formData, setFormData] = useState({
+        name: '',
+        email: '',
+        address: '',
+        gstin: ''
+    })
+
+    useEffect(() => {
+        loadClients()
+    }, [])
+
+    async function loadClients() {
+        try {
+            const data = await window.electronAPI.getClients()
+            setClients(data)
+        } catch (error) {
+            console.error('Failed to load clients:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    function openNewForm() {
+        setFormData({ name: '', email: '', address: '', gstin: '' })
+        setEditingClient(null)
+        setShowForm(true)
+    }
+
+    function openEditForm(client: Client) {
+        setFormData({
+            name: client.name,
+            email: client.email || '',
+            address: client.address || '',
+            gstin: client.gstin || ''
+        })
+        setEditingClient(client)
+        setShowForm(true)
+    }
+
+    async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault()
+
+        try {
+            if (editingClient) {
+                await window.electronAPI.updateClient(editingClient.uuid, formData)
+            } else {
+                await window.electronAPI.createClient(formData)
+            }
+
+            setShowForm(false)
+            loadClients()
+        } catch (error) {
+            console.error('Failed to save client:', error)
+        }
+    }
+
+    async function handleDelete(id: string) {
+        if (!confirm('Are you sure you want to delete this client?')) return
+
+        try {
+            await window.electronAPI.deleteClient(id)
+            loadClients()
+        } catch (error) {
+            console.error('Failed to delete client:', error)
+        }
+    }
+
+    if (loading) {
+        return (
+            <div className="empty-state">
+                <p className="empty-state-description">Loading clients...</p>
+            </div>
+        )
+    }
+
+    return (
+        <div>
+            <div className="page-header">
+                <div>
+                    <h1 className="page-title">Clients</h1>
+                    <p className="page-subtitle">Manage your client directory</p>
+                </div>
+                <button onClick={openNewForm} className="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Add Client
+                </button>
+            </div>
+
+            {/* Modal Form */}
+            {showForm && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.7)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 100
+                    }}
+                    onClick={() => setShowForm(false)}
+                >
+                    <div
+                        className="card"
+                        style={{ width: '100%', maxWidth: '480px', margin: 'var(--spacing-lg)' }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <h2 style={{ marginBottom: 'var(--spacing-lg)' }}>
+                            {editingClient ? 'Edit Client' : 'New Client'}
+                        </h2>
+
+                        <form onSubmit={handleSubmit}>
+                            <div className="form-group">
+                                <label className="form-label">Company / Name *</label>
+                                <input
+                                    type="text"
+                                    className="form-input"
+                                    value={formData.name}
+                                    onChange={e => setFormData(d => ({ ...d, name: e.target.value }))}
+                                    required
+                                    placeholder="Acme Corporation"
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label className="form-label">Email</label>
+                                <input
+                                    type="email"
+                                    className="form-input"
+                                    value={formData.email}
+                                    onChange={e => setFormData(d => ({ ...d, email: e.target.value }))}
+                                    placeholder="billing@company.com"
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label className="form-label">Address</label>
+                                <textarea
+                                    className="form-textarea"
+                                    value={formData.address}
+                                    onChange={e => setFormData(d => ({ ...d, address: e.target.value }))}
+                                    placeholder="123 Business Street, City - 560001"
+                                    style={{ minHeight: '80px' }}
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label className="form-label">GSTIN</label>
+                                <input
+                                    type="text"
+                                    className="form-input"
+                                    value={formData.gstin}
+                                    onChange={e => setFormData(d => ({ ...d, gstin: e.target.value.toUpperCase() }))}
+                                    placeholder="29XXXXX1234XXXX"
+                                    maxLength={15}
+                                />
+                            </div>
+
+                            <div style={{ display: 'flex', gap: 'var(--spacing-md)', justifyContent: 'flex-end' }}>
+                                <button type="button" onClick={() => setShowForm(false)} className="btn btn-ghost">
+                                    Cancel
+                                </button>
+                                <button type="submit" className="btn btn-primary">
+                                    {editingClient ? 'Update' : 'Create'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {clients.length === 0 ? (
+                <div className="empty-state">
+                    <svg className="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                    </svg>
+                    <h3 className="empty-state-title">No clients yet</h3>
+                    <p className="empty-state-description">
+                        Add your clients to quickly create invoices for them.
+                    </p>
+                    <button onClick={openNewForm} className="btn btn-primary">
+                        Add Client
+                    </button>
+                </div>
+            ) : (
+                <div className="table-container">
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>GSTIN</th>
+                                <th style={{ width: '120px' }}>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {clients.map(client => (
+                                <tr key={client.uuid}>
+                                    <td>
+                                        <strong>{client.name}</strong>
+                                        {client.address && (
+                                            <div className="card-meta" style={{ marginTop: '4px' }}>
+                                                {client.address.split('\n')[0]}
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td>{client.email || '—'}</td>
+                                    <td>
+                                        <code style={{
+                                            fontFamily: 'var(--font-mono)',
+                                            fontSize: '0.8125rem',
+                                            color: 'var(--color-text-secondary)'
+                                        }}>
+                                            {client.gstin || '—'}
+                                        </code>
+                                    </td>
+                                    <td>
+                                        <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                                            <button
+                                                onClick={() => openEditForm(client)}
+                                                className="btn btn-ghost btn-sm"
+                                            >
+                                                Edit
+                                            </button>
+                                            <button
+                                                onClick={() => handleDelete(client.uuid)}
+                                                className="btn btn-ghost btn-sm"
+                                                style={{ color: 'var(--color-error)' }}
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    )
+}
