@@ -28,13 +28,14 @@ jobs:
           node-version: 24
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            sudo apt-get update
-            sudo apt-get install -y rpm
-          fi
-          npm install
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Install dependencies
+        run: npm install
 
       - name: Build and Publish
         run: npm run dist
