@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useToast } from '../contexts/ToastContext'
 import { useParams } from 'react-router-dom'
 import { RichTextEditor } from '../components/RichTextEditor'
+import { ConflictResolver } from '../components/ConflictResolver'
 
 interface PaymentProfile {
     id: string
@@ -12,6 +13,8 @@ interface PaymentProfile {
     ifsc_code: string | null
     account_number: string
     is_default: number
+    has_conflict?: number
+    conflict_data?: string | null
 }
 
 interface Signature {
@@ -19,6 +22,8 @@ interface Signature {
     name: string
     image_blob: string
     is_default: number
+    has_conflict?: number
+    conflict_data?: string | null
 }
 
 interface SellerInfo {
@@ -34,6 +39,8 @@ interface EmailTemplate {
     subject: string
     body: string
     is_default: number
+    has_conflict?: number
+    conflict_data?: string | null
 }
 
 export default function Settings() {
@@ -78,6 +85,11 @@ export default function Settings() {
     const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null)
     const [hasCustomAuth, setHasCustomAuth] = useState(false)
     const [showAdvanced, setShowAdvanced] = useState(false)
+
+    // Conflict resolver state
+    const [conflictProfile, setConflictProfile] = useState<PaymentProfile | null>(null)
+    const [conflictSig, setConflictSig] = useState<Signature | null>(null)
+    const [conflictTemplate, setConflictTemplate] = useState<EmailTemplate | null>(null)
 
     useEffect(() => {
         loadData()
@@ -281,6 +293,33 @@ export default function Settings() {
         }
     }
 
+    async function handleResolveProfileConflict(resolvedData: any) {
+        if (!conflictProfile) return
+        try {
+            await (window.electronAPI as any).resolvePaymentProfileConflict(conflictProfile.id, resolvedData)
+            setConflictProfile(null)
+            loadData()
+        } catch (e) { console.error(e) }
+    }
+
+    async function handleResolveSignatureConflict(resolvedData: any) {
+        if (!conflictSig) return
+        try {
+            await (window.electronAPI as any).resolveSignatureConflict(conflictSig.id, resolvedData)
+            setConflictSig(null)
+            loadData()
+        } catch (e) { console.error(e) }
+    }
+
+    async function handleResolveTemplateConflict(resolvedData: any) {
+        if (!conflictTemplate) return
+        try {
+            await (window.electronAPI as any).resolveEmailTemplateConflict(conflictTemplate.id, resolvedData)
+            setConflictTemplate(null)
+            loadData()
+        } catch (e) { console.error(e) }
+    }
+
     async function handleUploadCredentials() {
         try {
             const uploadSuccess = await window.electronAPI.uploadCustomCredentials()
@@ -312,20 +351,55 @@ export default function Settings() {
         )
     }
 
+    // Count all conflicts across entity types
+    const totalConflicts =
+        profiles.filter(p => p.has_conflict).length +
+        signatures.filter(s => s.has_conflict).length +
+        emailTemplates.filter(t => t.has_conflict).length
+
     return (
-        <div style={{ 
-            height: '100%',
-            overflowY: 'auto',
-            padding: 'var(--spacing-xl)',
-            scrollBehavior: 'smooth'
-        }}>
+        <div style={{ height: '100%', overflowY: 'auto', padding: 'var(--spacing-xl)', scrollBehavior: 'smooth' }}>
             <div style={{ maxWidth: '800px', width: '100%', margin: '0 auto' }}>
                 <div className="page-header" style={{ marginBottom: 'var(--spacing-2xl)' }}>
                     <div>
                         <h1 className="page-title">Settings</h1>
                         <p className="page-subtitle">Manage your profile, bank details, signatures, and integrations</p>
                     </div>
+                    {totalConflicts > 0 && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'rgba(239,68,68,0.12)', color: 'var(--color-error)', borderRadius: '6px', fontSize: '0.875rem', fontWeight: 600, border: '1px solid rgba(239,68,68,0.3)' }}>
+                            ⚠️ {totalConflicts} sync conflict{totalConflicts !== 1 ? 's' : ''} need resolution
+                        </span>
+                    )}
                 </div>
+
+            {/* Conflict Resolver Modals */}
+            {conflictProfile && (
+                <ConflictResolver
+                    title={`Sync Conflict — ${conflictProfile.beneficiary_name}`}
+                    localData={conflictProfile}
+                    remoteData={JSON.parse(conflictProfile.conflict_data || '{}')}
+                    onResolve={handleResolveProfileConflict}
+                    ignoredKeys={['id', 'updated_at', 'last_synced_at', 'has_conflict', 'conflict_data', 'is_default']}
+                />
+            )}
+            {conflictSig && (
+                <ConflictResolver
+                    title={`Sync Conflict — ${conflictSig.name}`}
+                    localData={{ ...conflictSig, image_blob: '[signature image]' }}
+                    remoteData={{ ...JSON.parse(conflictSig.conflict_data || '{}'), image_blob: '[signature image]' }}
+                    onResolve={(resolved) => handleResolveSignatureConflict({ ...resolved, image_blob: resolved.image_blob === '[signature image]' ? conflictSig.image_blob : resolved.image_blob })}
+                    ignoredKeys={['id', 'updated_at', 'last_synced_at', 'has_conflict', 'conflict_data', 'is_default', 'image_blob']}
+                />
+            )}
+            {conflictTemplate && (
+                <ConflictResolver
+                    title={`Sync Conflict — ${conflictTemplate.name}`}
+                    localData={conflictTemplate}
+                    remoteData={JSON.parse(conflictTemplate.conflict_data || '{}')}
+                    onResolve={handleResolveTemplateConflict}
+                    ignoredKeys={['id', 'updated_at', 'last_synced_at', 'has_conflict', 'conflict_data', 'is_default']}
+                />
+            )}
 
             {/* Business Info Tab */}
             {activeTab === 'seller' && (
@@ -449,9 +523,17 @@ export default function Settings() {
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
                             {profiles.map((profile: any) => (
-                                <div key={profile.id} className="card" style={{ borderColor: profile.is_default ? 'var(--color-accent)' : undefined, position: 'relative' }}>
-                                    {Boolean(profile.is_default) && (
+                                <div key={profile.id} className="card" style={{ borderColor: profile.has_conflict ? 'var(--color-error)' : profile.is_default ? 'var(--color-accent)' : undefined, position: 'relative' }}>
+                                    {Boolean(profile.is_default) && !profile.has_conflict && (
                                         <span className="badge badge-sent" style={{ position: 'absolute', top: 'var(--spacing-md)', right: 'var(--spacing-md)' }}>Default</span>
+                                    )}
+                                    {Boolean(profile.has_conflict) && (
+                                        <span
+                                            onClick={() => setConflictProfile(profile)}
+                                            style={{ position: 'absolute', top: 'var(--spacing-md)', right: 'var(--spacing-md)', fontSize: '0.7rem', padding: '2px 8px', background: 'rgba(239,68,68,0.15)', color: 'var(--color-error)', borderRadius: '4px', fontWeight: 700, cursor: 'pointer' }}
+                                        >
+                                            ⚠ CONFLICT — Click to Resolve
+                                        </span>
                                     )}
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-sm)' }}>
                                         <div><span className="card-meta">Beneficiary</span><div>{profile.beneficiary_name}</div></div>
@@ -459,9 +541,14 @@ export default function Settings() {
                                         <div><span className="card-meta">Account</span><div style={{ fontFamily: 'var(--font-mono)' }}>{profile.account_number}</div></div>
                                         <div><span className="card-meta">IFSC</span><div style={{ fontFamily: 'var(--font-mono)' }}>{profile.ifsc_code || '—'}</div></div>
                                     </div>
-                                    {!profile.is_default && (
+                                    {!profile.is_default && !profile.has_conflict && (
                                         <button onClick={() => setDefaultProfile(profile.id)} className="btn btn-ghost btn-sm" style={{ marginTop: 'var(--spacing-md)' }}>
                                             Set as Default
+                                        </button>
+                                    )}
+                                    {Boolean(profile.has_conflict) && (
+                                        <button onClick={() => setConflictProfile(profile)} className="btn btn-sm" style={{ marginTop: 'var(--spacing-md)', background: 'rgba(239,68,68,0.15)', color: 'var(--color-error)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', padding: '4px 12px', cursor: 'pointer' }}>
+                                            Resolve Conflict
                                         </button>
                                     )}
                                 </div>
@@ -512,34 +599,29 @@ export default function Settings() {
                     ) : (
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 'var(--spacing-md)' }}>
                             {signatures.map((sig: any) => (
-                                <div key={sig.id} className="card" style={{ textAlign: 'center', position: 'relative', borderColor: sig.is_default ? 'var(--color-accent)' : undefined }}>
-                                    {Boolean(sig.is_default) && (
+                                <div key={sig.id} className="card" style={{ textAlign: 'center', position: 'relative', borderColor: sig.has_conflict ? 'var(--color-error)' : sig.is_default ? 'var(--color-accent)' : undefined }}>
+                                    {Boolean(sig.is_default) && !sig.has_conflict && (
                                         <span className="badge badge-sent" style={{ position: 'absolute', top: 'var(--spacing-xs)', right: 'var(--spacing-xs)' }}>Default</span>
                                     )}
+                                    {Boolean(sig.has_conflict) && (
+                                        <span
+                                            onClick={() => setConflictSig(sig)}
+                                            style={{ position: 'absolute', top: 'var(--spacing-xs)', right: 'var(--spacing-xs)', fontSize: '0.65rem', padding: '2px 6px', background: 'rgba(239,68,68,0.15)', color: 'var(--color-error)', borderRadius: '4px', fontWeight: 700, cursor: 'pointer' }}
+                                        >
+                                            ⚠ CONFLICT
+                                        </span>
+                                    )}
                                     <div style={{ background: 'repeating-conic-gradient(#eee 0% 25%, white 0% 50%) 0 0 / 16px 16px', borderRadius: '4px', padding: '12px', margin: '16px 0 8px 0' }}>
-                                        <img
-                                            src={`data:image/png;base64,${sig.image_blob}`}
-                                            alt={sig.name}
-                                            style={{ maxHeight: '80px', maxWidth: '100%', objectFit: 'contain' }}
-                                        />
+                                        <img src={`data:image/png;base64,${sig.image_blob}`} alt={sig.name} style={{ maxHeight: '80px', maxWidth: '100%', objectFit: 'contain' }} />
                                     </div>
                                     <p style={{ fontWeight: 600, marginBottom: 'var(--spacing-sm)' }}>{sig.name}</p>
-                                    <div style={{ display: 'flex', gap: 'var(--spacing-xs)', justifyContent: 'center' }}>
-                                        {!sig.is_default && (
-                                            <button
-                                                onClick={() => handleSetDefaultSignature(sig.id)}
-                                                className="btn btn-ghost btn-sm"
-                                            >
-                                                Set Default
-                                            </button>
+                                    <div style={{ display: 'flex', gap: 'var(--spacing-xs)', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                        {Boolean(sig.has_conflict) ? (
+                                            <button onClick={() => setConflictSig(sig)} className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }}>Resolve</button>
+                                        ) : (
+                                            !sig.is_default && <button onClick={() => handleSetDefaultSignature(sig.id)} className="btn btn-ghost btn-sm">Set Default</button>
                                         )}
-                                        <button
-                                            onClick={() => handleDeleteSignature(sig.id)}
-                                            className="btn btn-ghost btn-sm"
-                                            style={{ color: 'var(--color-error)' }}
-                                        >
-                                            Delete
-                                        </button>
+                                        <button onClick={() => handleDeleteSignature(sig.id)} className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }}>Delete</button>
                                     </div>
                                 </div>
                             ))}
@@ -574,7 +656,6 @@ export default function Settings() {
                                     label="Email Body *" 
                                     value={templateForm.body} 
                                     onChange={(v: string) => setTemplateForm({ ...templateForm, body: v })} 
-                                    placeholder="Dear {{client_name}}, ..."
                                 />
                                 <p className="card-meta" style={{ marginTop: '-12px', marginBottom: 'var(--spacing-md)' }}>Available placeholders: {'{{invoice_no}}'}, {'{{client_name}}'}, {'{{total_amount}}'}, {'{{currency}}'}</p>
                                 <div style={{ display: 'flex', gap: 'var(--spacing-md)', justifyContent: 'flex-end' }}>
@@ -593,38 +674,35 @@ export default function Settings() {
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
                             {emailTemplates.map((template: any) => (
-                                <div key={template.id} className="card" style={{ borderColor: template.is_default ? 'var(--color-accent)' : undefined, position: 'relative' }}>
-                                    {Boolean(template.is_default) && (
+                                <div key={template.id} className="card" style={{ borderColor: template.has_conflict ? 'var(--color-error)' : template.is_default ? 'var(--color-accent)' : undefined, position: 'relative' }}>
+                                    {Boolean(template.is_default) && !template.has_conflict && (
                                         <span className="badge badge-sent" style={{ position: 'absolute', top: 'var(--spacing-md)', right: 'var(--spacing-md)' }}>Default</span>
+                                    )}
+                                    {Boolean(template.has_conflict) && (
+                                        <span
+                                            onClick={() => setConflictTemplate(template)}
+                                            style={{ position: 'absolute', top: 'var(--spacing-md)', right: 'var(--spacing-md)', fontSize: '0.7rem', padding: '2px 8px', background: 'rgba(239,68,68,0.15)', color: 'var(--color-error)', borderRadius: '4px', fontWeight: 700, cursor: 'pointer' }}
+                                        >
+                                            ⚠ CONFLICT — Click to Resolve
+                                        </span>
                                     )}
                                     <div style={{ marginBottom: 'var(--spacing-md)' }}>
                                         <h4 style={{ margin: '0 0 var(--spacing-xs) 0' }}>{template.name}</h4>
                                         <div style={{ color: 'var(--color-accent)', fontSize: '0.9rem', marginBottom: 'var(--spacing-xs)' }}>{template.subject}</div>
-                                        <p className="card-meta" 
-                                           style={{ 
-                                               marginTop: 'var(--spacing-sm)', 
-                                               display: '-webkit-box', 
-                                               WebkitLineClamp: 2, 
-                                               WebkitBoxOrient: 'vertical', 
-                                               overflow: 'hidden',
-                                               maxHeight: '40px'
-                                           }}
-                                           dangerouslySetInnerHTML={{ __html: template.body.replace(/<[^>]*>?/gm, ' ') }} 
+                                        <p className="card-meta"
+                                           style={{ marginTop: 'var(--spacing-sm)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', maxHeight: '40px' }}
+                                           dangerouslySetInnerHTML={{ __html: template.body.replace(/<[^>]*>?/gm, ' ') }}
                                         />
                                     </div>
                                     <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
-                                        {!template.is_default && (
-                                            <button onClick={() => setDefaultTemplate(template.id)} className="btn btn-ghost btn-sm">
-                                                Set as Default
-                                            </button>
-                                        )}
-                                        <button onClick={() => handleEditTemplate(template)} className="btn btn-ghost btn-sm">
-                                            Edit
-                                        </button>
-                                        {!template.is_default && (
-                                            <button onClick={() => handleDeleteTemplate(template.id)} className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }}>
-                                                Delete
-                                            </button>
+                                        {Boolean(template.has_conflict) ? (
+                                            <button onClick={() => setConflictTemplate(template)} className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }}>Resolve Conflict</button>
+                                        ) : (
+                                            <>
+                                                {!template.is_default && <button onClick={() => setDefaultTemplate(template.id)} className="btn btn-ghost btn-sm">Set as Default</button>}
+                                                <button onClick={() => handleEditTemplate(template)} className="btn btn-ghost btn-sm">Edit</button>
+                                                {!template.is_default && <button onClick={() => handleDeleteTemplate(template.id)} className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }}>Delete</button>}
+                                            </>
                                         )}
                                     </div>
                                 </div>
@@ -666,7 +744,7 @@ export default function Settings() {
                                 <div className="card">
                                     <h3 style={{ marginBottom: 'var(--spacing-md)' }}>Drive Sync</h3>
                                     <p className="card-meta" style={{ marginBottom: 'var(--spacing-lg)' }}>
-                                        Sync all draft/scheduled invoice metadata to your Google Drive folder.
+                                        Sync all entities (invoices, clients, signatures, bank profiles, templates) to your Google Drive.
                                     </p>
                                     <button onClick={handleDriveSync} className="btn btn-secondary" disabled={googleLoading}>
                                         {googleLoading ? 'Syncing...' : '↻ Sync Now'}
@@ -674,7 +752,7 @@ export default function Settings() {
                                     {syncResult && (
                                         <div style={{ marginTop: 'var(--spacing-md)' }}>
                                             <p style={{ color: 'var(--color-success, #22c55e)' }}>
-                                                ✓ {syncResult.synced} invoice{syncResult.synced !== 1 ? 's' : ''} synced
+                                                ✓ {syncResult.synced} record{syncResult.synced !== 1 ? 's' : ''} synced across all entities
                                             </p>
                                             {syncResult.errors && syncResult.errors.length > 0 && (
                                                 <ul style={{ color: 'var(--color-error)', marginTop: 'var(--spacing-sm)', fontSize: '0.875rem' }}>

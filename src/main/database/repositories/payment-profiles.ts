@@ -10,6 +10,10 @@ export interface PaymentProfile {
     ifsc_code: string | null
     account_number: string
     is_default: number
+    updated_at?: number
+    last_synced_at?: number
+    has_conflict?: number
+    conflict_data?: string | null
 }
 
 export interface CreatePaymentProfileData {
@@ -39,14 +43,15 @@ export function getDefaultPaymentProfile(): PaymentProfile | null {
 export function createPaymentProfile(data: CreatePaymentProfileData): PaymentProfile {
     const db = getDatabase()
     const id = uuidv4()
+    const now = Date.now()
 
     // If this is the first profile, make it default
     const existingProfiles = getPaymentProfiles()
     const isDefault = existingProfiles.length === 0 ? 1 : 0
 
     db.prepare(`
-    INSERT INTO payment_profiles (id, beneficiary_name, bank_name, account_type, branch, ifsc_code, account_number, is_default)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO payment_profiles (id, beneficiary_name, bank_name, account_type, branch, ifsc_code, account_number, is_default, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
         id,
         data.beneficiary_name,
@@ -55,66 +60,73 @@ export function createPaymentProfile(data: CreatePaymentProfileData): PaymentPro
         data.branch || null,
         data.ifsc_code || null,
         data.account_number,
-        isDefault
+        isDefault,
+        now
     )
 
-    return getPaymentProfile(id)!
+    const newProfile = getPaymentProfile(id)!
+    // Fire-and-forget event-driven push
+    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('payment_profiles', newProfile, 'id')).catch(() => {})
+    return newProfile
 }
 
 export function updatePaymentProfile(id: string, data: Partial<CreatePaymentProfileData>): PaymentProfile | null {
     const db = getDatabase()
     const existing = getPaymentProfile(id)
-
     if (!existing) return null
 
-    const updates: string[] = []
-    const values: any[] = []
+    const updates: string[] = ['updated_at = ?']
+    const values: any[] = [Date.now()]
 
-    if (data.beneficiary_name !== undefined) {
-        updates.push('beneficiary_name = ?')
-        values.push(data.beneficiary_name)
-    }
-    if (data.bank_name !== undefined) {
-        updates.push('bank_name = ?')
-        values.push(data.bank_name)
-    }
-    if (data.account_type !== undefined) {
-        updates.push('account_type = ?')
-        values.push(data.account_type)
-    }
-    if (data.branch !== undefined) {
-        updates.push('branch = ?')
-        values.push(data.branch)
-    }
-    if (data.ifsc_code !== undefined) {
-        updates.push('ifsc_code = ?')
-        values.push(data.ifsc_code)
-    }
-    if (data.account_number !== undefined) {
-        updates.push('account_number = ?')
-        values.push(data.account_number)
-    }
+    if (data.beneficiary_name !== undefined) { updates.push('beneficiary_name = ?'); values.push(data.beneficiary_name) }
+    if (data.bank_name !== undefined) { updates.push('bank_name = ?'); values.push(data.bank_name) }
+    if (data.account_type !== undefined) { updates.push('account_type = ?'); values.push(data.account_type) }
+    if (data.branch !== undefined) { updates.push('branch = ?'); values.push(data.branch) }
+    if (data.ifsc_code !== undefined) { updates.push('ifsc_code = ?'); values.push(data.ifsc_code) }
+    if (data.account_number !== undefined) { updates.push('account_number = ?'); values.push(data.account_number) }
 
-    if (updates.length === 0) return existing
+    if (updates.length === 1) return existing // only updated_at, nothing real changed
 
     values.push(id)
-
     db.prepare(`UPDATE payment_profiles SET ${updates.join(', ')} WHERE id = ?`).run(...values)
 
-    return getPaymentProfile(id)
+    const updatedProfile = getPaymentProfile(id)
+    if (updatedProfile) {
+        import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('payment_profiles', updatedProfile, 'id')).catch(() => {})
+    }
+    return updatedProfile
 }
 
 export function setDefaultPaymentProfile(id: string): PaymentProfile | null {
     const db = getDatabase()
     const profile = getPaymentProfile(id)
-
     if (!profile) return null
 
-    // Clear all defaults first
-    db.prepare('UPDATE payment_profiles SET is_default = 0').run()
-
-    // Set the new default
-    db.prepare('UPDATE payment_profiles SET is_default = 1 WHERE id = ?').run(id)
+    db.prepare('UPDATE payment_profiles SET is_default = 0, updated_at = ?').run(Date.now())
+    db.prepare('UPDATE payment_profiles SET is_default = 1, updated_at = ? WHERE id = ?').run(Date.now(), id)
 
     return getPaymentProfile(id)
+}
+
+export function resolvePaymentProfileConflict(id: string, resolvedData: any): PaymentProfile {
+    const db = getDatabase()
+    db.prepare(`
+        UPDATE payment_profiles SET
+        beneficiary_name = ?, bank_name = ?, account_type = ?,
+        branch = ?, ifsc_code = ?, account_number = ?, updated_at = ?,
+        has_conflict = 0, conflict_data = NULL, last_synced_at = 0
+        WHERE id = ?
+    `).run(
+        resolvedData.beneficiary_name,
+        resolvedData.bank_name,
+        resolvedData.account_type || 'Savings Account',
+        resolvedData.branch || null,
+        resolvedData.ifsc_code || null,
+        resolvedData.account_number,
+        Date.now(),
+        id
+    )
+    const resolved = getPaymentProfile(id)!
+    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('payment_profiles', resolved, 'id')).catch(() => {})
+    return resolved
 }

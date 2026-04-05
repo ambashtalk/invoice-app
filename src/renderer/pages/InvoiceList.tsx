@@ -14,6 +14,7 @@ interface Invoice {
     created_at: number
     updated_at: number
     scheduled_at: number | null
+    has_conflict: number
 }
 
 interface Client {
@@ -191,7 +192,13 @@ export default function InvoiceList() {
         let result = [...invoices]
 
         if (filters.search) result = result.filter(inv => inv.invoice_no.toLowerCase().includes(filters.search.toLowerCase()))
-        if (filters.statuses.length < 5) result = result.filter(inv => filters.statuses.includes(inv.status))
+        if (filters.statuses.length > 0 && filters.statuses.length < 6) {
+            result = result.filter(inv => {
+                const isConflictFilter = filters.statuses.includes('CONFLICTS')
+                if (isConflictFilter && inv.has_conflict) return true
+                return filters.statuses.includes(inv.status)
+            })
+        }
         if (filters.clientIds.length < clients.size) result = result.filter(inv => inv.client_id && filters.clientIds.includes(inv.client_id))
         if (filters.min) result = result.filter(inv => inv.total_amount >= parseFloat(filters.min))
         if (filters.max) result = result.filter(inv => inv.total_amount <= parseFloat(filters.max))
@@ -393,7 +400,7 @@ export default function InvoiceList() {
                     <div className="card" style={{ marginTop: isMobile ? '8px' : '24px', padding: '16px' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1.2fr 1.2fr 1fr 0.5fr', gap: '16px', alignItems: 'flex-end' }}>
                             <BaseInput placeholder="Invoice No..." value={filters.search} onChange={(v: string) => updateFilter('search', v)} style={{ margin: 0 }} noMargin />
-                            <BaseDropdown label="Status" options={[{ label: 'Draft', value: 'DRAFT' }, { label: 'Scheduled', value: 'SCHEDULED' }, { label: 'Sent', value: 'SENT' }, { label: 'Paid', value: 'PAID' }, { label: 'Cancelled', value: 'CANCELLED' }]} selected={filters.statuses} onChange={(v: any) => updateFilter('statuses', v)} multi noMargin />
+                            <BaseDropdown label="Status" options={[{ label: 'Draft', value: 'DRAFT' }, { label: 'Scheduled', value: 'SCHEDULED' }, { label: 'Sent', value: 'SENT' }, { label: 'Paid', value: 'PAID' }, { label: 'Cancelled', value: 'CANCELLED' }, { label: '⚠️ Conflicts', value: 'CONFLICTS' }]} selected={filters.statuses} onChange={(v: any) => updateFilter('statuses', v)} multi noMargin />
                             <BaseDropdown label="Client" options={Array.from(clients.values()).map(c => ({ label: c.name, value: c.uuid }))} selected={filters.clientIds} onChange={(v: any) => updateFilter('clientIds', v)} multi noMargin />
                             <div style={{ display: 'flex', gap: '4px', flexDirection: 'column' }}>
                                 <label className="form-label" style={{ marginBottom: '8px' }}>Amount Range</label>
@@ -423,7 +430,10 @@ export default function InvoiceList() {
                             >
                                 <div className="invoice-mobile-row">
                                     <span style={{ fontWeight: 700, color: 'var(--color-accent)' }}>{inv.invoice_no}</span>
-                                    <span className={`badge badge-${inv.status.toLowerCase()}`}>{inv.status}</span>
+                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        {inv.has_conflict === 1 && <span className="badge" style={{ background: 'var(--color-error)', color: '#fff' }}>⚠️ Requires Review</span>}
+                                        <span className={`badge badge-${inv.status.toLowerCase()}`}>{inv.status}</span>
+                                    </div>
                                 </div>
                                 <div className="invoice-mobile-row">
                                     <span style={{ color: 'var(--color-text-secondary)', fontSize: '14px' }}>
@@ -499,13 +509,12 @@ export default function InvoiceList() {
                                         </div>
                                     </td>
                                     <td style={{ padding: '16px', textAlign: 'left' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: '12px', minWidth: '180px' }}>
-                                            <div style={{ minWidth: '90px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                                <span className={`badge badge-${inv.status.toLowerCase()}`} style={{ display: 'inline-block', textAlign: 'center', minWidth: '80px' }}>{inv.status}</span>
-                                                {inv.status === 'SCHEDULED' && inv.scheduled_at && (
-                                                    <span style={{ fontSize: '10px', color: 'var(--color-accent)', fontWeight: 600 }}>{new Date(inv.scheduled_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                                                )}
-                                            </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyItems: 'flex-start', flexWrap: 'wrap', gap: '8px', minWidth: '180px' }}>
+                                            <span className={`badge badge-${inv.status.toLowerCase()}`} style={{ display: 'inline-block', textAlign: 'center', minWidth: '80px' }}>{inv.status}</span>
+                                            {inv.has_conflict === 1 && <span className="badge" style={{ background: 'var(--color-error)', color: '#fff' }}>⚠️ Requires Review</span>}
+                                            {inv.status === 'SCHEDULED' && inv.scheduled_at && (
+                                                <div style={{ width: '100%', fontSize: '10px', color: 'var(--color-accent)', fontWeight: 600 }}>{new Date(inv.scheduled_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                            )}
                                         </div>
                                     </td>
                                     <td style={{ padding: '16px', textAlign: 'left', fontWeight: 600 }}>{formatCurrency(inv.total_amount, inv.currency)}</td>

@@ -57,6 +57,27 @@ function runMigrations(): void {
         console.error('Invoices sig_id migration failed:', error)
     }
 
+    // Universal Sync Columns migration
+    const syncTables = ['clients', 'signatures', 'payment_profiles', 'email_templates']
+    for (const tableName of syncTables) {
+        try {
+            const tableInfo = database.pragma(`table_info('${tableName}')`) as any[]
+            const hasUpdatedAt = tableInfo.some((c: any) => c.name === 'updated_at')
+            const hasSyncFields = tableInfo.some((c: any) => c.name === 'last_synced_at')
+
+            if (!hasUpdatedAt) {
+                database.exec(`ALTER TABLE ${tableName} ADD COLUMN updated_at INTEGER DEFAULT ${Date.now()}`)
+            }
+            if (!hasSyncFields) {
+                database.exec(`ALTER TABLE ${tableName} ADD COLUMN last_synced_at INTEGER DEFAULT 0`)
+                database.exec(`ALTER TABLE ${tableName} ADD COLUMN has_conflict INTEGER DEFAULT 0`)
+                database.exec(`ALTER TABLE ${tableName} ADD COLUMN conflict_data TEXT`)
+            }
+        } catch (error) {
+            console.error(`Migration for universal sync columns failed on ${tableName}:`, error)
+        }
+    }
+
     // Migration for PAID/CANCELLED statuses and Removal of Foreign Keys
     try {
         const tableInfo = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invoices'").get() as { sql: string }
@@ -81,7 +102,10 @@ function runMigrations(): void {
                         email_body TEXT,
                         scheduled_at INTEGER,
                         created_at INTEGER NOT NULL,
-                        updated_at INTEGER NOT NULL
+                        updated_at INTEGER NOT NULL,
+                        last_synced_at INTEGER DEFAULT 0,
+                        has_conflict INTEGER DEFAULT 0,
+                        conflict_data TEXT
                     )
                 `)
                 database.exec(`
@@ -93,7 +117,8 @@ function runMigrations(): void {
                     SELECT 
                         uuid, invoice_no, client_id, signature_id, status, 
                         currency, exchange_rate, total_amount, tax_rate, 
-                        items, email_body, scheduled_at, created_at, updated_at
+                        items, email_body, scheduled_at, created_at, updated_at,
+                        last_synced_at, has_conflict, conflict_data
                     FROM invoices
                 `)
                 database.exec(`DROP TABLE invoices`)
@@ -175,7 +200,10 @@ function getInlineSchema(): string {
       email TEXT,
       address TEXT,
       gstin TEXT,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      last_synced_at INTEGER DEFAULT 0,
+      has_conflict INTEGER DEFAULT 0,
+      conflict_data TEXT
     );
 
     CREATE TABLE IF NOT EXISTS invoices (
@@ -192,14 +220,21 @@ function getInlineSchema(): string {
       email_body TEXT,
       scheduled_at INTEGER,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      last_synced_at INTEGER DEFAULT 0,
+      has_conflict INTEGER DEFAULT 0,
+      conflict_data TEXT
     );
 
     CREATE TABLE IF NOT EXISTS signatures (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       image_blob TEXT NOT NULL,
-      is_default INTEGER DEFAULT 0
+      is_default INTEGER DEFAULT 0,
+      updated_at INTEGER DEFAULT 0,
+      last_synced_at INTEGER DEFAULT 0,
+      has_conflict INTEGER DEFAULT 0,
+      conflict_data TEXT
     );
 
     CREATE TABLE IF NOT EXISTS payment_profiles (
@@ -210,7 +245,11 @@ function getInlineSchema(): string {
       branch TEXT,
       ifsc_code TEXT,
       account_number TEXT NOT NULL,
-      is_default INTEGER DEFAULT 0
+      is_default INTEGER DEFAULT 0,
+      updated_at INTEGER DEFAULT 0,
+      last_synced_at INTEGER DEFAULT 0,
+      has_conflict INTEGER DEFAULT 0,
+      conflict_data TEXT
     );
 
     CREATE TABLE IF NOT EXISTS email_templates (
@@ -218,7 +257,11 @@ function getInlineSchema(): string {
       name TEXT NOT NULL,
       subject TEXT NOT NULL,
       body TEXT NOT NULL,
-      is_default INTEGER DEFAULT 0
+      is_default INTEGER DEFAULT 0,
+      updated_at INTEGER DEFAULT 0,
+      last_synced_at INTEGER DEFAULT 0,
+      has_conflict INTEGER DEFAULT 0,
+      conflict_data TEXT
     );
 
     CREATE TABLE IF NOT EXISTS outbox (

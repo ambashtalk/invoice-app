@@ -11,9 +11,11 @@ const electronAPI = {
     deleteInvoice: (id: string) => ipcRenderer.invoke('db:invoices:delete', id),
     markInvoicePaid: (id: string) => ipcRenderer.invoke('db:invoices:mark-paid', id),
     markInvoiceCancelled: (id: string) => ipcRenderer.invoke('db:invoices:mark-cancelled', id),
+    resolveInvoiceConflict: (id: string, data: any) => ipcRenderer.invoke('db:invoices:resolve-conflict', id, data),
 
     // Clients
     getClients: () => ipcRenderer.invoke('db:clients:list'),
+    resolveClientConflict: (id: string, data: any) => ipcRenderer.invoke('db:clients:resolve-conflict', id, data),
     getClient: (id: string) => ipcRenderer.invoke('db:clients:get', id),
     createClient: (data: any) => ipcRenderer.invoke('db:clients:create', data),
     updateClient: (id: string, data: any) => ipcRenderer.invoke('db:clients:update', id, data),
@@ -24,12 +26,14 @@ const electronAPI = {
     createSignature: (data: any) => ipcRenderer.invoke('db:signatures:create', data),
     deleteSignature: (id: string) => ipcRenderer.invoke('db:signatures:delete', id),
     setDefaultSignature: (id: string) => ipcRenderer.invoke('db:signatures:set-default', id),
+    resolveSignatureConflict: (id: string, data: any) => ipcRenderer.invoke('db:signatures:resolve-conflict', id, data),
 
     // Payment Profiles
     getPaymentProfiles: () => ipcRenderer.invoke('db:payment-profiles:list'),
     createPaymentProfile: (data: any) => ipcRenderer.invoke('db:payment-profiles:create', data),
     updatePaymentProfile: (id: string, data: any) => ipcRenderer.invoke('db:payment-profiles:update', id, data),
     setDefaultPaymentProfile: (id: string) => ipcRenderer.invoke('db:payment-profiles:set-default', id),
+    resolvePaymentProfileConflict: (id: string, data: any) => ipcRenderer.invoke('db:payment-profiles:resolve-conflict', id, data),
 
     // Signature processing
     pickSignatureFile: () => ipcRenderer.invoke('signature:pick-file'),
@@ -72,6 +76,7 @@ const electronAPI = {
     updateEmailTemplate: (id: string, data: any) => ipcRenderer.invoke('db:email-templates:update', id, data),
     deleteEmailTemplate: (id: string) => ipcRenderer.invoke('db:email-templates:delete', id),
     setDefaultEmailTemplate: (id: string) => ipcRenderer.invoke('db:email-templates:set-default', id),
+    resolveEmailTemplateConflict: (id: string, data: any) => ipcRenderer.invoke('db:email-templates:resolve-conflict', id, data),
 
     // Events
     onOutboxUpdate: (callback: (data: { pendingCount: number }) => void) => {

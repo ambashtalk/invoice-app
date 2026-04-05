@@ -23,6 +23,9 @@ export interface Invoice {
     scheduled_at: number | null
     created_at: number
     updated_at: number
+    last_synced_at: number
+    has_conflict: number
+    conflict_data: string | null
 }
 
 export interface CreateInvoiceData {
@@ -89,8 +92,9 @@ export function createInvoice(data: CreateInvoiceData): Invoice {
     const stmt = db.prepare(`
     INSERT INTO invoices (
       uuid, invoice_no, client_id, signature_id, status, currency, exchange_rate,
-      total_amount, tax_rate, items, email_body, scheduled_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      total_amount, tax_rate, items, email_body, scheduled_at, created_at, updated_at,
+      last_synced_at, has_conflict, conflict_data
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL)
   `)
 
     stmt.run(
@@ -110,7 +114,12 @@ export function createInvoice(data: CreateInvoiceData): Invoice {
         now
     )
 
-    return getInvoice(uuid)!
+    const newInv = getInvoice(uuid)!
+    
+    // Background single sync
+    import('../../sync/drive-sync').then(m => m.pushSingleInvoiceToDrive(newInv)).catch(() => {})
+
+    return newInv
 }
 
 export function updateInvoice(id: string, data: Partial<CreateInvoiceData>): Invoice | null {
@@ -164,7 +173,12 @@ export function updateInvoice(id: string, data: Partial<CreateInvoiceData>): Inv
 
     db.prepare(`UPDATE invoices SET ${updates.join(', ')} WHERE uuid = ?`).run(...values)
 
-    return getInvoice(id)
+    const updatedInv = getInvoice(id)
+    if (updatedInv) {
+        import('../../sync/drive-sync').then(m => m.pushSingleInvoiceToDrive(updatedInv)).catch(() => {})
+    }
+    
+    return updatedInv
 }
 
 export function deleteInvoice(id: string): boolean {
@@ -185,7 +199,12 @@ export function deleteInvoice(id: string): boolean {
 export function updateInvoiceStatus(id: string, status: 'DRAFT' | 'SCHEDULED' | 'SENT' | 'PAID' | 'CANCELLED'): Invoice | null {
     const db = getDatabase()
     db.prepare('UPDATE invoices SET status = ?, updated_at = ? WHERE uuid = ?').run(status, Date.now(), id)
-    return getInvoice(id)
+    
+    const updatedInv = getInvoice(id)
+    if (updatedInv) {
+        import('../../sync/drive-sync').then(m => m.pushSingleInvoiceToDrive(updatedInv)).catch(() => {})
+    }
+    return updatedInv
 }
 
 export function markAsPaid(id: string): Invoice | null {
@@ -194,4 +213,74 @@ export function markAsPaid(id: string): Invoice | null {
 
 export function markAsCancelled(id: string): Invoice | null {
     return updateInvoiceStatus(id, 'CANCELLED')
+}
+
+export function upsertInvoiceFromSync(data: any): Invoice {
+    const db = getDatabase()
+    const existing = db.prepare('SELECT uuid FROM invoices WHERE uuid = ?').get(data.uuid)
+    
+    // We expect `data.items` to be an array from parsed JSON remote sync. 
+    // We must stringify it for the sqlite column.
+    const itemsRaw = typeof data.items === 'string' ? data.items : JSON.stringify(data.items || [])
+
+    if (existing) {
+        db.prepare(`
+            UPDATE invoices SET
+            invoice_no = ?, client_id = ?, signature_id = ?, status = ?, currency = ?, exchange_rate = ?,
+            total_amount = ?, tax_rate = ?, items = ?, email_body = ?, scheduled_at = ?, created_at = ?, updated_at = ?, last_synced_at = ?, has_conflict = 0, conflict_data = NULL
+            WHERE uuid = ?
+        `).run(
+            data.invoice_no, data.client_id, data.signature_id, data.status, data.currency, data.exchange_rate,
+            data.total_amount, data.tax_rate, itemsRaw, data.email_body, data.scheduled_at, data.created_at, data.updated_at, data.updated_at,
+            data.uuid
+        )
+    } else {
+        db.prepare(`
+            INSERT INTO invoices (
+            uuid, invoice_no, client_id, signature_id, status, currency, exchange_rate,
+            total_amount, tax_rate, items, email_body, scheduled_at, created_at, updated_at, last_synced_at, has_conflict, conflict_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+        `).run(
+            data.uuid, data.invoice_no, data.client_id, data.signature_id, data.status, data.currency, data.exchange_rate,
+            data.total_amount, data.tax_rate, itemsRaw, data.email_body, data.scheduled_at, data.created_at, data.updated_at, data.updated_at
+        )
+    }
+    return getInvoice(data.uuid)!
+}
+
+export function logSyncConflict(uuid: string, remoteData: any): void {
+    const db = getDatabase()
+    db.prepare('UPDATE invoices SET has_conflict = 1, conflict_data = ? WHERE uuid = ?').run(
+        JSON.stringify(remoteData),
+        uuid
+    )
+}
+
+export function markInvoiceSynced(uuid: string, syncedTime: number): void {
+    const db = getDatabase()
+    db.prepare('UPDATE invoices SET last_synced_at = ? WHERE uuid = ?').run(syncedTime, uuid)
+}
+
+export function resolveInvoiceConflict(uuid: string, resolvedData: any): Invoice {
+    const db = getDatabase()
+    const itemsRaw = typeof resolvedData.items === 'string' ? resolvedData.items : JSON.stringify(resolvedData.items || [])
+    
+    // Update the local data with the strictly resolved data, set has_conflict = 0, conflict_data = NULL
+    db.prepare(`
+        UPDATE invoices SET
+        client_id = ?, signature_id = ?, currency = ?, exchange_rate = ?,
+        total_amount = ?, tax_rate = ?, items = ?, email_body = ?, scheduled_at = ?, updated_at = ?,
+        has_conflict = 0, conflict_data = NULL, last_synced_at = ?
+        WHERE uuid = ?
+    `).run(
+        resolvedData.client_id, resolvedData.signature_id, resolvedData.currency, resolvedData.exchange_rate,
+        resolvedData.total_amount, resolvedData.tax_rate, itemsRaw, resolvedData.email_body, resolvedData.scheduled_at, Date.now(),
+        0, // Set last_synced_at to 0 so it will push on next sync natively
+        uuid
+    )
+    
+    const resolvedInv = getInvoice(uuid)!
+    import('../../sync/drive-sync').then(m => m.pushSingleInvoiceToDrive(resolvedInv)).catch(() => {})
+    
+    return resolvedInv
 }

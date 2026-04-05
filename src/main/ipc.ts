@@ -6,26 +6,30 @@ import {
     updateInvoice,
     deleteInvoice,
     markAsPaid,
-    markAsCancelled
+    markAsCancelled,
+    resolveInvoiceConflict
 } from './database/repositories/invoices'
 import {
     getClients,
     getClient,
     createClient,
     updateClient,
-    deleteClient
+    deleteClient,
+    resolveClientConflict
 } from './database/repositories/clients'
 import {
     getSignatures,
     createSignature,
     deleteSignature,
-    setDefaultSignature
+    setDefaultSignature,
+    resolveSignatureConflict
 } from './database/repositories/signatures'
 import {
     getPaymentProfiles,
     createPaymentProfile,
     updatePaymentProfile,
-    setDefaultPaymentProfile
+    setDefaultPaymentProfile,
+    resolvePaymentProfileConflict
 } from './database/repositories/payment-profiles'
 import { processSignatureFromBase64 } from './signature-processor'
 import { getExchangeRate } from './services/currency'
@@ -43,7 +47,7 @@ import {
     saveCustomCredentials,
     deleteCustomCredentials
 } from './auth/google-auth'
-import { syncInvoicesToDrive } from './sync/drive-sync'
+import { syncTableToDrive } from './sync/drive-sync'
 import { scheduleInvoice, getOutboxItems, cancelScheduledInvoice, getPendingOutboxCount } from './services/outbox'
 import {
     getEmailTemplates,
@@ -52,7 +56,8 @@ import {
     updateEmailTemplate,
     deleteEmailTemplate,
     setDefaultEmailTemplate,
-    getDefaultEmailTemplate
+    getDefaultEmailTemplate,
+    resolveEmailTemplateConflict
 } from './database/repositories/email-templates'
 
 export function registerIpcHandlers(): void {
@@ -72,6 +77,13 @@ export function registerIpcHandlers(): void {
     ipcMain.handle('db:invoices:delete', (_, id: string) => deleteInvoice(id))
     ipcMain.handle('db:invoices:mark-paid', (_, id: string) => markAsPaid(id))
     ipcMain.handle('db:invoices:mark-cancelled', (_, id: string) => markAsCancelled(id))
+    ipcMain.handle('db:invoices:resolve-conflict', (_, id: string, data: any) => resolveInvoiceConflict(id, data))
+
+    // Conflict resolution for other entities
+    ipcMain.handle('db:clients:resolve-conflict', (_, id: string, data: any) => resolveClientConflict(id, data))
+    ipcMain.handle('db:signatures:resolve-conflict', (_, id: string, data: any) => resolveSignatureConflict(id, data))
+    ipcMain.handle('db:payment-profiles:resolve-conflict', (_, id: string, data: any) => resolvePaymentProfileConflict(id, data))
+    ipcMain.handle('db:email-templates:resolve-conflict', (_, id: string, data: any) => resolveEmailTemplateConflict(id, data))
 
     // Client handlers
     ipcMain.handle('db:clients:list', () => getClients())
@@ -212,9 +224,23 @@ export function registerIpcHandlers(): void {
         return true
     })
 
-    // Drive Sync
+    // Drive Sync — syncs ALL entity tables through the universal generic engine
     ipcMain.handle('drive:sync', async () => {
-        return syncInvoicesToDrive()
+        const tables = [
+            { name: 'invoices', pk: 'uuid' },
+            { name: 'clients', pk: 'uuid' },
+            { name: 'signatures', pk: 'id' },
+            { name: 'payment_profiles', pk: 'id' },
+            { name: 'email_templates', pk: 'id' }
+        ]
+        let totalSynced = 0
+        const errors: string[] = []
+        for (const t of tables) {
+            const r = await syncTableToDrive(t.name, t.pk).catch(e => ({ synced: 0, errors: [e.message as string] }))
+            totalSynced += r.synced
+            errors.push(...r.errors)
+        }
+        return { synced: totalSynced, errors }
     })
 
     // Outbox

@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
 import { BaseInput } from '../components/BaseInput'
 import { BaseDropdown } from '../components/BaseDropdown'
+import { ConflictResolver } from '../components/ConflictResolver'
 import { numberToWords } from '../../shared/utils/numbers-to-words'
 import { calculateTax } from '../../shared/utils/tax-calculator'
 
@@ -153,6 +154,7 @@ export default function InvoiceEditor() {
     const [isSending, setIsSending] = useState(false)
     const [initialData, setInitialData] = useState<FormData | null>(null)
     const [showActions, setShowActions] = useState(false)
+    const [conflictData, setConflictData] = useState<any>(null)
 
     const [formData, setFormData] = useState<FormData>({
         client_id: '',
@@ -207,6 +209,16 @@ export default function InvoiceEditor() {
                         setIsReadOnly(true)
                     } else {
                         setIsReadOnly(!isEditModeUrl)
+                    }
+                    
+                    if (invoice.has_conflict === 1 && invoice.conflict_data) {
+                        try {
+                            setConflictData(JSON.parse(invoice.conflict_data))
+                        } catch (e) {
+                            console.error('Failed to parse conflict data', e)
+                        }
+                    } else {
+                        setConflictData(null)
                     }
                 }
             } else if (signaturesList.length > 0) {
@@ -379,10 +391,38 @@ export default function InvoiceEditor() {
         } catch (err: any) { error(err.message) }
     }
 
+    async function handleResolveConflict(resolvedData: any) {
+        if (!id) return
+        setSaving(true)
+        try {
+            // Include dynamic keys but reformat items safely
+            const payload = {
+                ...resolvedData,
+                items: typeof resolvedData.items === 'string' ? JSON.parse(resolvedData.items) : resolvedData.items
+            }
+            await window.electronAPI.resolveInvoiceConflict(id, payload)
+            success('Conflict successfully resolved.')
+            setConflictData(null)
+            loadData(false)
+        } catch (err) {
+            console.error('Resolution failed', err)
+            error('Failed to resolve conflict.')
+        } finally {
+            setSaving(false)
+        }
+    }
+
     if (loading) return <div className="empty-state"><p>Loading...</p></div>
 
     return (
         <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+            {conflictData && initialData && (
+                <ConflictResolver 
+                    localData={initialData} 
+                    remoteData={conflictData} 
+                    onResolve={handleResolveConflict} 
+                />
+            )}
             {/* Stick Header */}
             <div style={{ flexShrink: 0, paddingBottom: '16px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-primary)', zIndex: 10, marginTop: '-24px', paddingTop: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: '16px' }}>

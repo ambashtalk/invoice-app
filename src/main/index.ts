@@ -7,6 +7,7 @@ import { join } from 'path'
 import { initDatabase } from './database'
 import { registerIpcHandlers } from './ipc'
 import { startOutboxPoller, stopOutboxPoller } from './services/outbox'
+import { startPeriodicSync } from './sync/drive-sync'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -56,6 +57,9 @@ app.whenReady().then(() => {
 
     // Start the outbox poller (fire-and-forget background process)
     startOutboxPoller()
+
+    // Start background quiet-sync with Google Drive
+    startPeriodicSync()
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

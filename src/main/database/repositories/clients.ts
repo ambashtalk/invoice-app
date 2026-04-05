@@ -8,6 +8,9 @@ export interface Client {
     address: string | null
     gstin: string | null
     updated_at: number
+    last_synced_at?: number
+    has_conflict?: number
+    conflict_data?: string | null
 }
 
 export interface CreateClientData {
@@ -37,44 +40,57 @@ export function createClient(data: CreateClientData): Client {
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(uuid, data.name, data.email || null, data.address || null, data.gstin || null, now)
 
-    return getClient(uuid)!
+    const newClient = getClient(uuid)!
+    // Fire-and-forget event-driven push
+    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('clients', newClient, 'uuid')).catch(() => {})
+    return newClient
 }
 
 export function updateClient(id: string, data: Partial<CreateClientData>): Client | null {
     const db = getDatabase()
     const existing = getClient(id)
-
     if (!existing) return null
 
     const updates: string[] = ['updated_at = ?']
     const values: any[] = [Date.now()]
 
-    if (data.name !== undefined) {
-        updates.push('name = ?')
-        values.push(data.name)
-    }
-    if (data.email !== undefined) {
-        updates.push('email = ?')
-        values.push(data.email)
-    }
-    if (data.address !== undefined) {
-        updates.push('address = ?')
-        values.push(data.address)
-    }
-    if (data.gstin !== undefined) {
-        updates.push('gstin = ?')
-        values.push(data.gstin)
-    }
-
+    if (data.name !== undefined) { updates.push('name = ?'); values.push(data.name) }
+    if (data.email !== undefined) { updates.push('email = ?'); values.push(data.email) }
+    if (data.address !== undefined) { updates.push('address = ?'); values.push(data.address) }
+    if (data.gstin !== undefined) { updates.push('gstin = ?'); values.push(data.gstin) }
     values.push(id)
 
     db.prepare(`UPDATE clients SET ${updates.join(', ')} WHERE uuid = ?`).run(...values)
 
-    return getClient(id)
+    const updatedClient = getClient(id)
+    if (updatedClient) {
+        import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('clients', updatedClient, 'uuid')).catch(() => {})
+    }
+    return updatedClient
 }
 
 export function deleteClient(id: string): boolean {
     const db = getDatabase()
     const result = db.prepare('DELETE FROM clients WHERE uuid = ?').run(id)
     return result.changes > 0
+}
+
+export function resolveClientConflict(uuid: string, resolvedData: any): Client {
+    const db = getDatabase()
+    db.prepare(`
+        UPDATE clients SET
+        name = ?, email = ?, address = ?, gstin = ?, updated_at = ?,
+        has_conflict = 0, conflict_data = NULL, last_synced_at = 0
+        WHERE uuid = ?
+    `).run(
+        resolvedData.name,
+        resolvedData.email || null,
+        resolvedData.address || null,
+        resolvedData.gstin || null,
+        Date.now(),
+        uuid
+    )
+    const resolved = getClient(uuid)!
+    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('clients', resolved, 'uuid')).catch(() => {})
+    return resolved
 }
