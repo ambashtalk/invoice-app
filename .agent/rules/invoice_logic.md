@@ -11,3 +11,7 @@ trigger: always_on
     - [cite_start]Implement "Rupees in Words" for INR totals[cite: 15].
     - [cite_start]Display Bank Details clearly in the footer.
     - [cite_start]Highlight 'Authorised Signatory' with an overlay area for digitized signatures[cite: 12, 13].
+
+# Email & Dispatch
+- Dispatch Logic: Use `multipart/alternative` via Gmail API to send invoices with both HTML (rich text) bodies and plain-text fallbacks alongside the generated PDF.
+- Placeholders: Use mustache-style placeholders (`{{invoice_no}}`, `{{client_name}}`, `{{total_amount}}`, `{{currency}}`, `{{seller_name}}`) inside email templates.
