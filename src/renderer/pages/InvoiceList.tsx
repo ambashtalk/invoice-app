@@ -106,7 +106,8 @@ const canModifySchedule = (status: string) => status === 'SCHEDULED'
 const canCancelSchedule = (status: string) => status === 'SCHEDULED'
 const canMarkPaid = (status: string) => ['SENT', 'SCHEDULED'].includes(status)
 const canResend = (status: string) => status === 'SENT'
-const canCancelInvoice = (status: string) => ['DRAFT', 'SENT', 'SCHEDULED'].includes(status)
+// SCHEDULED is intentionally excluded — cancel the schedule first (back to DRAFT), then void
+const canCancelInvoice = (status: string) => ['DRAFT', 'SENT'].includes(status)
 
 // --- Main Component ---
 
@@ -444,24 +445,51 @@ export default function InvoiceList() {
                                 <div className="invoice-mobile-row" style={{ marginTop: '8px', borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
                                     <span style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>{new Date(inv.created_at).toLocaleDateString()}</span>
                                     <div style={{ display: 'flex', gap: '8px' }}>
-                                        <button onClick={e => { e.stopPropagation(); navigate(`/invoices/${inv.uuid}/preview`, { state: { fromDashboard: true } }); }} className="btn btn-ghost btn-icon btn-sm"><IconFile /></button>
-                                        <button onClick={e => { e.stopPropagation(); handleDuplicate(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" title="Duplicate"><IconCopy /></button>
-                                        <button onClick={e => { e.stopPropagation(); navigate(`/invoices/${inv.uuid}/preview`, { state: { fromDashboard: true } }); }} className="btn btn-ghost btn-icon btn-sm" title="View PDF"><IconFile /></button>
-                                        <button onClick={e => { e.stopPropagation(); handleDuplicate(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" title="Duplicate Invoice"><IconCopy /></button>
+                                        {canEdit(inv.status) && (
+                                            <button onClick={e => { e.stopPropagation(); navigate(`/invoices/${inv.uuid}/edit`, { state: { fromDashboard: true } }); }} className="btn btn-ghost btn-icon btn-sm" title="Edit Invoice">
+                                                <IconPencil />
+                                            </button>
+                                        )}
+                                        {canModifySchedule(inv.status) && (
+                                            <button onClick={e => { e.stopPropagation(); navigate(`/invoices/${inv.uuid}/preview`, { state: { openSchedule: true, fromDashboard: true } }); }} className="btn btn-ghost btn-icon btn-sm" title="Modify Dispatch Schedule">
+                                                <IconCalendar />
+                                            </button>
+                                        )}
+                                        <button onClick={e => { e.stopPropagation(); navigate(`/invoices/${inv.uuid}/preview`, { state: { fromDashboard: true } }); }} className="btn btn-ghost btn-icon btn-sm" title="View PDF Preview">
+                                            <IconFile />
+                                        </button>
                                         {canMarkPaid(inv.status) && (
-                                            <button onClick={e => { e.stopPropagation(); handleMarkPaid(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-success)' }} title="Mark as Paid"><IconCheckmark /></button>
+                                            <button onClick={e => { e.stopPropagation(); handleMarkPaid(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-success)' }} title="Mark as Paid">
+                                                <IconCheckmark />
+                                            </button>
                                         )}
                                         {canResend(inv.status) && (
-                                            <button onClick={e => { e.stopPropagation(); setQuickSendInvoice(inv); setQuickSendEmail(inv.client_id ? (clients.get(inv.client_id)?.email || '') : ''); }} className="btn btn-ghost btn-icon btn-sm" title="Resend Email"><IconResend /></button>
+                                            <button onClick={e => { e.stopPropagation(); setQuickSendInvoice(inv); setQuickSendEmail(inv.client_id ? (clients.get(inv.client_id)?.email || '') : ''); }} className="btn btn-ghost btn-icon btn-sm" title="Resend Email">
+                                                <IconResend />
+                                            </button>
                                         )}
                                         {inv.status === 'DRAFT' && (
-                                            <>
-                                                <button onClick={e => { e.stopPropagation(); setQuickSendInvoice(inv); setQuickSendEmail(inv.client_id ? (clients.get(inv.client_id)?.email || '') : ''); }} className="btn btn-ghost btn-icon btn-sm" title="Send Now"><IconSend /></button>
-                                                <button onClick={e => { e.stopPropagation(); handleDelete(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Delete Forever"><IconTrash /></button>
-                                            </>
+                                            <button onClick={e => { e.stopPropagation(); setQuickSendInvoice(inv); setQuickSendEmail(inv.client_id ? (clients.get(inv.client_id)?.email || '') : ''); }} className="btn btn-ghost btn-icon btn-sm" title="Send Invoice">
+                                                <IconSend />
+                                            </button>
+                                        )}
+                                        <button onClick={e => { e.stopPropagation(); handleDuplicate(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" title="Clone Invoice">
+                                            <IconCopy />
+                                        </button>
+                                        {canCancelSchedule(inv.status) && (
+                                            <button onClick={e => { e.stopPropagation(); handleCancelSchedule(inv.uuid, true); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Cancel Scheduled Send (reverts to Draft)">
+                                                <IconXCircle />
+                                            </button>
+                                        )}
+                                        {canDelete(inv.status) && (
+                                            <button onClick={e => { e.stopPropagation(); handleDelete(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Delete Draft Permanently">
+                                                <IconTrash />
+                                            </button>
                                         )}
                                         {canCancelInvoice(inv.status) && (
-                                            <button onClick={e => { e.stopPropagation(); handleMarkCancelled(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Void Invoice"><IconXCircle /></button>
+                                            <button onClick={e => { e.stopPropagation(); handleMarkCancelled(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Void Invoice">
+                                                <IconXCircle />
+                                            </button>
                                         )}
                                     </div>
                                 </div>
@@ -545,13 +573,13 @@ export default function InvoiceList() {
                                             
                                             {/* Risky Actions */}
                                             {canCancelSchedule(inv.status) && (
-                                                <button onClick={e => { e.stopPropagation(); handleCancelSchedule(inv.uuid, true); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Cancel Schedule (Back to Draft)"><IconXCircle /></button>
+                                                <button onClick={e => { e.stopPropagation(); handleCancelSchedule(inv.uuid, true); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Cancel Scheduled Send (reverts to Draft)"><IconXCircle /></button>
                                             )}
                                             {canDelete(inv.status) && (
-                                                <button onClick={e => { e.stopPropagation(); handleDelete(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Delete Forever"><IconTrash /></button>
+                                                <button onClick={e => { e.stopPropagation(); handleDelete(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Delete Draft Permanently"><IconTrash /></button>
                                             )}
                                             {canCancelInvoice(inv.status) && (
-                                                <button onClick={e => { e.stopPropagation(); handleMarkCancelled(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Void (Cancel) Invoice"><IconXCircle /></button>
+                                                <button onClick={e => { e.stopPropagation(); handleMarkCancelled(inv.uuid); }} className="btn btn-ghost btn-icon btn-sm" style={{ color: 'var(--color-error)' }} title="Void Invoice"><IconXCircle /></button>
                                             )}
                                         </div>
                                     </td>
