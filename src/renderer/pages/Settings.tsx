@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useToast } from '../contexts/ToastContext'
+import { useParams } from 'react-router-dom'
+import { RichTextEditor } from '../components/RichTextEditor'
 
 interface PaymentProfile {
     id: string
@@ -26,11 +28,21 @@ interface SellerInfo {
     gstin: string
 }
 
+interface EmailTemplate {
+    id: string
+    name: string
+    subject: string
+    body: string
+    is_default: number
+}
+
 export default function Settings() {
+    const { tab: urlTab } = useParams<{ tab: string }>()
     const { success, error: toastError } = useToast()
-    const [activeTab, setActiveTab] = useState<'seller' | 'bank' | 'signatures' | 'google'>('seller')
+    const activeTab = (urlTab as any) || 'seller'
     const [profiles, setProfiles] = useState<PaymentProfile[]>([])
     const [signatures, setSignatures] = useState<Signature[]>([])
+    const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([])
     const [loading, setLoading] = useState(true)
     const [googleConnected, setGoogleConnected] = useState(false)
 
@@ -42,6 +54,14 @@ export default function Settings() {
         branch: '',
         ifsc_code: '',
         account_number: ''
+    })
+
+    const [showTemplateForm, setShowTemplateForm] = useState(false)
+    const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
+    const [templateForm, setTemplateForm] = useState({
+        name: '',
+        subject: '',
+        body: ''
     })
 
     const [sellerForm, setSellerForm] = useState<SellerInfo>({
@@ -63,14 +83,16 @@ export default function Settings() {
 
     async function loadData() {
         try {
-            const [profilesData, signaturesData, seller, connected] = await Promise.all([
+            const [profilesData, signaturesData, templatesData, seller, connected] = await Promise.all([
                 window.electronAPI.getPaymentProfiles(),
                 window.electronAPI.getSignatures(),
+                window.electronAPI.getEmailTemplates(),
                 window.electronAPI.getSellerInfo(),
                 window.electronAPI.isGoogleConnected()
             ])
             setProfiles(profilesData)
             setSignatures(signaturesData)
+            setEmailTemplates(templatesData)
             if (seller) setSellerForm(seller)
             setGoogleConnected(connected)
         } catch (error) {
@@ -101,6 +123,63 @@ export default function Settings() {
         } catch (error) {
             console.error('Failed to set default profile:', error)
             toastError('Failed to set default profile.')
+        }
+    }
+
+    async function handleTemplateSubmit(e: React.FormEvent) {
+        e.preventDefault()
+        try {
+            if (editingTemplate) {
+                await window.electronAPI.updateEmailTemplate(editingTemplate.id, templateForm)
+                success('Template updated successfully.')
+            } else {
+                await window.electronAPI.createEmailTemplate(templateForm)
+                success('Template created successfully.')
+            }
+            setShowTemplateForm(false)
+            setEditingTemplate(null)
+            setTemplateForm({ name: '', subject: '', body: '' })
+            loadData()
+        } catch (error) {
+            console.error('Failed to save template:', error)
+            toastError('Failed to save template.')
+        }
+    }
+
+    async function handleEditTemplate(template: EmailTemplate) {
+        setEditingTemplate(template)
+        setTemplateForm({
+            name: template.name,
+            subject: template.subject,
+            body: template.body
+        })
+        setShowTemplateForm(true)
+    }
+
+    async function handleDeleteTemplate(id: string) {
+        if (!confirm('Delete this template?')) return
+        try {
+            const success_flag = await window.electronAPI.deleteEmailTemplate(id)
+            if (success_flag) {
+                success('Template deleted.')
+                loadData()
+            } else {
+                toastError('Cannot delete the default template.')
+            }
+        } catch (error) {
+            console.error('Failed to delete template:', error)
+            toastError('Failed to delete template.')
+        }
+    }
+
+    async function setDefaultTemplate(id: string) {
+        try {
+            await window.electronAPI.setDefaultEmailTemplate(id)
+            loadData()
+            success('Default template updated.')
+        } catch (error) {
+            console.error('Failed to set default template:', error)
+            toastError('Failed to set default template.')
         }
     }
 
@@ -207,26 +286,19 @@ export default function Settings() {
     }
 
     return (
-        <div style={{ maxWidth: '800px' }}>
-            <div className="page-header">
-                <div>
-                    <h1 className="page-title">Settings</h1>
-                    <p className="page-subtitle">Manage your profile, bank details, signatures, and integrations</p>
+        <div style={{ 
+            height: '100%',
+            overflowY: 'auto',
+            padding: 'var(--spacing-xl)',
+            scrollBehavior: 'smooth'
+        }}>
+            <div style={{ maxWidth: '800px', width: '100%', margin: '0 auto' }}>
+                <div className="page-header" style={{ marginBottom: 'var(--spacing-2xl)' }}>
+                    <div>
+                        <h1 className="page-title">Settings</h1>
+                        <p className="page-subtitle">Manage your profile, bank details, signatures, and integrations</p>
+                    </div>
                 </div>
-            </div>
-
-            {/* Tabs */}
-            <div style={{ display: 'flex', gap: 'var(--spacing-sm)', marginBottom: 'var(--spacing-xl)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--spacing-md)' }}>
-                {(['seller', 'bank', 'signatures', 'google'] as const).map(tab => (
-                    <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`btn ${activeTab === tab ? 'btn-primary' : 'btn-ghost'}`}
-                    >
-                        {tab === 'seller' ? 'Business Info' : tab === 'bank' ? 'Bank Details' : tab === 'signatures' ? 'Signatures' : 'Google'}
-                    </button>
-                ))}
-            </div>
 
             {/* Business Info Tab */}
             {activeTab === 'seller' && (
@@ -262,7 +334,7 @@ export default function Settings() {
                                         type="text"
                                         className="form-input"
                                         value={sellerForm.pan}
-                                        onChange={e => setSellerForm(f => ({ ...f, pan: e.target.value.toUpperCase() }))}
+                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSellerForm((f: any) => ({ ...f, pan: e.target.value.toUpperCase() }))}
                                         placeholder="ABCDE1234F"
                                         maxLength={10}
                                         style={{ fontFamily: 'var(--font-mono)' }}
@@ -274,7 +346,7 @@ export default function Settings() {
                                         type="text"
                                         className="form-input"
                                         value={sellerForm.gstin}
-                                        onChange={e => setSellerForm(f => ({ ...f, gstin: e.target.value.toUpperCase() }))}
+                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSellerForm((f: any) => ({ ...f, gstin: e.target.value.toUpperCase() }))}
                                         placeholder="22ABCDE1234F1Z5"
                                         maxLength={15}
                                         style={{ fontFamily: 'var(--font-mono)' }}
@@ -296,7 +368,7 @@ export default function Settings() {
                 <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-lg)' }}>
                         <h2>Payment Profiles</h2>
-                        <button onClick={() => setShowBankForm(true)} className="btn btn-secondary">
+                        <button onClick={() => { setBankForm({ beneficiary_name: '', bank_name: '', account_type: 'Savings Account', branch: '', ifsc_code: '', account_number: '' }); setShowBankForm(true); }} className="btn btn-secondary">
                             + Add Profile
                         </button>
                     </div>
@@ -308,30 +380,30 @@ export default function Settings() {
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-md)' }}>
                                     <div className="form-group">
                                         <label className="form-label">Beneficiary Name *</label>
-                                        <input type="text" className="form-input" value={bankForm.beneficiary_name} onChange={e => setBankForm(d => ({ ...d, beneficiary_name: e.target.value }))} required />
+                                        <input type="text" className="form-input" value={bankForm.beneficiary_name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankForm((d: any) => ({ ...d, beneficiary_name: e.target.value }))} required />
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Bank Name *</label>
-                                        <input type="text" className="form-input" value={bankForm.bank_name} onChange={e => setBankForm(d => ({ ...d, bank_name: e.target.value }))} required />
+                                        <input type="text" className="form-input" value={bankForm.bank_name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankForm((d: any) => ({ ...d, bank_name: e.target.value }))} required />
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Account Type</label>
-                                        <select className="form-select" value={bankForm.account_type} onChange={e => setBankForm(d => ({ ...d, account_type: e.target.value }))}>
+                                        <select className="form-select" value={bankForm.account_type} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setBankForm((d: any) => ({ ...d, account_type: e.target.value }))}>
                                             <option>Savings Account</option>
                                             <option>Current Account</option>
                                         </select>
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Branch</label>
-                                        <input type="text" className="form-input" value={bankForm.branch} onChange={e => setBankForm(d => ({ ...d, branch: e.target.value }))} />
+                                        <input type="text" className="form-input" value={bankForm.branch} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankForm((d: any) => ({ ...d, branch: e.target.value }))} />
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">IFSC Code</label>
-                                        <input type="text" className="form-input" value={bankForm.ifsc_code} onChange={e => setBankForm(d => ({ ...d, ifsc_code: e.target.value.toUpperCase() }))} maxLength={11} />
+                                        <input type="text" className="form-input" value={bankForm.ifsc_code} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankForm((d: any) => ({ ...d, ifsc_code: e.target.value.toUpperCase() }))} maxLength={11} />
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Account Number *</label>
-                                        <input type="text" className="form-input" value={bankForm.account_number} onChange={e => setBankForm(d => ({ ...d, account_number: e.target.value }))} required />
+                                        <input type="text" className="form-input" value={bankForm.account_number} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankForm((d: any) => ({ ...d, account_number: e.target.value }))} required />
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', gap: 'var(--spacing-md)', justifyContent: 'flex-end' }}>
@@ -349,9 +421,9 @@ export default function Settings() {
                         </div>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                            {profiles.map(profile => (
+                            {profiles.map((profile: any) => (
                                 <div key={profile.id} className="card" style={{ borderColor: profile.is_default ? 'var(--color-accent)' : undefined, position: 'relative' }}>
-                                    {profile.is_default && (
+                                    {Boolean(profile.is_default) && (
                                         <span className="badge badge-sent" style={{ position: 'absolute', top: 'var(--spacing-md)', right: 'var(--spacing-md)' }}>Default</span>
                                     )}
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-sm)' }}>
@@ -390,7 +462,7 @@ export default function Settings() {
                                     type="text"
                                     className="form-input"
                                     value={sigName}
-                                    onChange={e => setSigName(e.target.value)}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSigName(e.target.value)}
                                     placeholder="e.g. Main Signature"
                                 />
                             </div>
@@ -412,7 +484,7 @@ export default function Settings() {
                         </div>
                     ) : (
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 'var(--spacing-md)' }}>
-                            {signatures.map(sig => (
+                            {signatures.map((sig: any) => (
                                 <div key={sig.id} className="card" style={{ textAlign: 'center', position: 'relative', borderColor: sig.is_default ? 'var(--color-accent)' : undefined }}>
                                     {Boolean(sig.is_default) && (
                                         <span className="badge badge-sent" style={{ position: 'absolute', top: 'var(--spacing-xs)', right: 'var(--spacing-xs)' }}>Default</span>
@@ -449,69 +521,156 @@ export default function Settings() {
                 </div>
             )}
 
-            {/* Google Tab */}
-            {activeTab === 'google' && (
+            {/* Email Templates Tab */}
+            {activeTab === 'email-templates' && (
                 <div>
-                    <h2 style={{ marginBottom: 'var(--spacing-lg)' }}>Google Integration</h2>
-                    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                                <h3>Google Account</h3>
-                                <p className="card-meta" style={{ marginTop: 'var(--spacing-sm)' }}>
-                                    {googleConnected
-                                        ? 'Connected — Drive sync and Gmail sending are enabled'
-                                        : 'Not connected — Connect to enable Drive sync and email sending'}
-                                </p>
-                            </div>
-                            <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
-                                {googleConnected ? (
-                                    <button onClick={handleGoogleDisconnect} className="btn btn-ghost" style={{ color: 'var(--color-error)' }}>
-                                        Disconnect
-                                    </button>
-                                ) : (
-                                    <button onClick={handleGoogleConnect} className="btn btn-primary" disabled={googleLoading}>
-                                        {googleLoading ? 'Connecting...' : 'Connect Google'}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-lg)' }}>
+                        <h2>Email Templates</h2>
+                        <button onClick={() => { setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '' }); setShowTemplateForm(true); }} className="btn btn-secondary">
+                            + Add Template
+                        </button>
                     </div>
 
-                    {googleConnected && (
-                        <div className="card">
-                            <h3 style={{ marginBottom: 'var(--spacing-md)' }}>Drive Sync</h3>
-                            <p className="card-meta" style={{ marginBottom: 'var(--spacing-lg)' }}>
-                                Sync all draft/scheduled invoice metadata to your Google Drive folder.
-                            </p>
-                            <button onClick={handleDriveSync} className="btn btn-secondary" disabled={googleLoading}>
-                                {googleLoading ? 'Syncing...' : '↻ Sync Now'}
-                            </button>
-                            {syncResult && (
-                                <div style={{ marginTop: 'var(--spacing-md)' }}>
-                                    <p style={{ color: 'var(--color-success, #22c55e)' }}>
-                                        ✓ {syncResult.synced} invoice{syncResult.synced !== 1 ? 's' : ''} synced
-                                    </p>
-                                    {syncResult.errors.length > 0 && (
-                                        <ul style={{ color: 'var(--color-error)', marginTop: 'var(--spacing-sm)', fontSize: '0.875rem' }}>
-                                            {syncResult.errors.map((err, i) => <li key={i}>{err}</li>)}
-                                        </ul>
-                                    )}
+                    {showTemplateForm && (
+                        <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+                            <h3 style={{ marginBottom: 'var(--spacing-lg)' }}>{editingTemplate ? 'Edit Template' : 'New Template'}</h3>
+                            <form onSubmit={handleTemplateSubmit}>
+                                <div className="form-group">
+                                    <label className="form-label">Template Name *</label>
+                                    <input type="text" className="form-input" value={templateForm.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTemplateForm((t: any) => ({ ...t, name: e.target.value }))} required placeholder="e.g. Standard Invoice" />
                                 </div>
-                            )}
+                                <div className="form-group">
+                                    <label className="form-label">Subject Line *</label>
+                                    <input type="text" className="form-input" value={templateForm.subject} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTemplateForm((t: any) => ({ ...t, subject: e.target.value }))} required placeholder="e.g. Invoice {{invoice_no}} from MyBusiness" />
+                                </div>
+                                <RichTextEditor 
+                                    label="Email Body *" 
+                                    value={templateForm.body} 
+                                    onChange={(v: string) => setTemplateForm({ ...templateForm, body: v })} 
+                                    placeholder="Dear {{client_name}}, ..."
+                                />
+                                <p className="card-meta" style={{ marginTop: '-12px', marginBottom: 'var(--spacing-md)' }}>Available placeholders: {'{{invoice_no}}'}, {'{{client_name}}'}, {'{{total_amount}}'}, {'{{currency}}'}</p>
+                                <div style={{ display: 'flex', gap: 'var(--spacing-md)', justifyContent: 'flex-end' }}>
+                                    <button type="button" onClick={() => { setShowTemplateForm(false); setEditingTemplate(null); }} className="btn btn-ghost">Cancel</button>
+                                    <button type="submit" className="btn btn-primary">Save Template</button>
+                                </div>
+                            </form>
                         </div>
                     )}
 
-                    {!googleConnected && (
-                        <div className="card" style={{ opacity: 0.7 }}>
-                            <p className="card-meta">
-                                To use Google integration, you need to add a <code>credentials.json</code> file
-                                (downloaded from Google Cloud Console) to your app's userData folder.
-                                See the implementation plan for setup instructions.
-                            </p>
+                    {emailTemplates.length === 0 ? (
+                        <div className="empty-state">
+                            <h3 className="empty-state-title">No email templates</h3>
+                            <p className="empty-state-description">Add templates to reuse subjects and bodies when sending invoices.</p>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+                            {emailTemplates.map((template: any) => (
+                                <div key={template.id} className="card" style={{ borderColor: template.is_default ? 'var(--color-accent)' : undefined, position: 'relative' }}>
+                                    {Boolean(template.is_default) && (
+                                        <span className="badge badge-sent" style={{ position: 'absolute', top: 'var(--spacing-md)', right: 'var(--spacing-md)' }}>Default</span>
+                                    )}
+                                    <div style={{ marginBottom: 'var(--spacing-md)' }}>
+                                        <h4 style={{ margin: '0 0 var(--spacing-xs) 0' }}>{template.name}</h4>
+                                        <div style={{ color: 'var(--color-accent)', fontSize: '0.9rem', marginBottom: 'var(--spacing-xs)' }}>{template.subject}</div>
+                                        <p className="card-meta" 
+                                           style={{ 
+                                               marginTop: 'var(--spacing-sm)', 
+                                               display: '-webkit-box', 
+                                               WebkitLineClamp: 2, 
+                                               WebkitBoxOrient: 'vertical', 
+                                               overflow: 'hidden',
+                                               maxHeight: '40px'
+                                           }}
+                                           dangerouslySetInnerHTML={{ __html: template.body.replace(/<[^>]*>?/gm, ' ') }} 
+                                        />
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
+                                        {!template.is_default && (
+                                            <button onClick={() => setDefaultTemplate(template.id)} className="btn btn-ghost btn-sm">
+                                                Set as Default
+                                            </button>
+                                        )}
+                                        <button onClick={() => handleEditTemplate(template)} className="btn btn-ghost btn-sm">
+                                            Edit
+                                        </button>
+                                        {!template.is_default && (
+                                            <button onClick={() => handleDeleteTemplate(template.id)} className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }}>
+                                                Delete
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
             )}
+
+                    {/* Google Tab */}
+                    {activeTab === 'google' && (
+                        <div>
+                            <h2 style={{ marginBottom: 'var(--spacing-lg)' }}>Google Integration</h2>
+                            <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                        <h3>Google Account</h3>
+                                        <p className="card-meta" style={{ marginTop: 'var(--spacing-sm)' }}>
+                                            {googleConnected
+                                                ? 'Connected — Drive sync and Gmail sending are enabled'
+                                                : 'Not connected — Connect to enable Drive sync and email sending'}
+                                        </p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
+                                        {googleConnected ? (
+                                            <button onClick={handleGoogleDisconnect} className="btn btn-ghost" style={{ color: 'var(--color-error)' }}>
+                                                Disconnect
+                                            </button>
+                                        ) : (
+                                            <button onClick={handleGoogleConnect} className="btn btn-primary" disabled={googleLoading}>
+                                                {googleLoading ? 'Connecting...' : 'Connect Google'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {googleConnected && (
+                                <div className="card">
+                                    <h3 style={{ marginBottom: 'var(--spacing-md)' }}>Drive Sync</h3>
+                                    <p className="card-meta" style={{ marginBottom: 'var(--spacing-lg)' }}>
+                                        Sync all draft/scheduled invoice metadata to your Google Drive folder.
+                                    </p>
+                                    <button onClick={handleDriveSync} className="btn btn-secondary" disabled={googleLoading}>
+                                        {googleLoading ? 'Syncing...' : '↻ Sync Now'}
+                                    </button>
+                                    {syncResult && (
+                                        <div style={{ marginTop: 'var(--spacing-md)' }}>
+                                            <p style={{ color: 'var(--color-success, #22c55e)' }}>
+                                                ✓ {syncResult.synced} invoice{syncResult.synced !== 1 ? 's' : ''} synced
+                                            </p>
+                                            {syncResult.errors && syncResult.errors.length > 0 && (
+                                                <ul style={{ color: 'var(--color-error)', marginTop: 'var(--spacing-sm)', fontSize: '0.875rem' }}>
+                                                    {syncResult.errors.map((err: string, i: number) => <li key={i}>{err}</li>)}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {!googleConnected && (
+                                <div className="card" style={{ opacity: 0.7 }}>
+                                    <p className="card-meta">
+                                        To use Google integration, you need to add a <code>credentials.json</code> file
+                                        (downloaded from Google Cloud Console) to your app's userData folder.
+                                        See the implementation plan for setup instructions.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
         </div>
     )
 }

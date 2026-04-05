@@ -246,7 +246,35 @@ export default function InvoiceList() {
         setIsSending(true)
         try {
             const scheduledAt = Date.now() + 10000 // 10s buffer
-            await window.electronAPI.scheduleInvoice(quickSendInvoice.uuid, quickSendEmail, scheduledAt, `Invoice ${quickSendInvoice.invoice_no}`, `Please find attached Invoice ${quickSendInvoice.invoice_no}. Thank you!`)
+            
+            let subject = `Invoice ${quickSendInvoice.invoice_no}`
+            let body = `Please find attached Invoice ${quickSendInvoice.invoice_no}. Thank you!`
+            
+            const [defaultTemplate, sellerInfo] = await Promise.all([
+                window.electronAPI.getDefaultEmailTemplate(),
+                window.electronAPI.getSellerInfo()
+            ])
+
+            if (defaultTemplate) {
+                const client = clients.get(quickSendInvoice.client_id || '')
+                const placeholders: Record<string, string> = {
+                    '{{invoice_no}}': quickSendInvoice.invoice_no || '',
+                    '{{client_name}}': client?.name || 'Customer',
+                    '{{total_amount}}': quickSendInvoice.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                    '{{currency}}': quickSendInvoice.currency || '',
+                    '{{seller_name}}': sellerInfo?.name || ''
+                }
+                
+                subject = defaultTemplate.subject
+                body = defaultTemplate.body
+                
+                Object.entries(placeholders).forEach(([key, value]) => {
+                    subject = subject.replace(new RegExp(key, 'g'), value)
+                    body = body.replace(new RegExp(key, 'g'), value)
+                })
+            }
+
+            await window.electronAPI.scheduleInvoice(quickSendInvoice.uuid, quickSendEmail, scheduledAt, subject, body)
             
             warning(`Sending invoice in 10s...`, {
                 label: 'Undo',
@@ -255,7 +283,10 @@ export default function InvoiceList() {
 
             setQuickSendInvoice(null)
             loadData(false)
-        } catch (err) { error('Quick send failed') } finally { setIsSending(false) }
+        } catch (err) { 
+            console.error('Quick send failed:', err)
+            error('Quick send failed') 
+        } finally { setIsSending(false) }
     }
 
     async function handleCancelSchedule(invoiceId: string, confirmNeeded: boolean = true) {

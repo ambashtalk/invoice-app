@@ -42,8 +42,25 @@ import {
 } from './auth/google-auth'
 import { syncInvoicesToDrive } from './sync/drive-sync'
 import { scheduleInvoice, getOutboxItems, cancelScheduledInvoice, getPendingOutboxCount } from './services/outbox'
+import {
+    getEmailTemplates,
+    getEmailTemplate,
+    createEmailTemplate,
+    updateEmailTemplate,
+    deleteEmailTemplate,
+    setDefaultEmailTemplate,
+    getDefaultEmailTemplate
+} from './database/repositories/email-templates'
 
 export function registerIpcHandlers(): void {
+    // Email template handlers
+    ipcMain.handle('db:email-templates:list', () => getEmailTemplates())
+    ipcMain.handle('db:email-templates:get', (_, id: string) => getEmailTemplate(id))
+    ipcMain.handle('db:email-templates:get-default', () => getDefaultEmailTemplate())
+    ipcMain.handle('db:email-templates:create', (_, data) => createEmailTemplate(data))
+    ipcMain.handle('db:email-templates:update', (_, id: string, data) => updateEmailTemplate(id, data))
+    ipcMain.handle('db:email-templates:delete', (_, id: string) => deleteEmailTemplate(id))
+    ipcMain.handle('db:email-templates:set-default', (_, id: string) => setDefaultEmailTemplate(id))
     // Invoice handlers
     ipcMain.handle('db:invoices:list', () => getInvoices())
     ipcMain.handle('db:invoices:get', (_, id: string) => getInvoice(id))

@@ -21,7 +21,7 @@ export default function App() {
                             <Route path="invoices/:id/edit" element={<InvoiceEditor />} />
                             <Route path="invoices/:id/preview" element={<InvoicePDF />} />
                             <Route path="clients" element={<ClientList />} />
-                            <Route path="settings" element={<Settings />} />
+                            <Route path="settings/:tab?" element={<Settings />} />
                         </Route>
                     </Routes>
                 </HashRouter>

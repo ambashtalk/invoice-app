@@ -125,9 +125,45 @@ function runMigrations(): void {
                 database.exec(`ALTER TABLE outbox_new RENAME TO outbox`)
                 database.exec(`CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status)`)
             })()
-        }
+            }
     } catch (error) {
         console.error('Database migration failed:', error)
+    }
+
+    // Migration for email_templates table
+    try {
+        const tableExists = database
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='email_templates'")
+            .get()
+        if (!tableExists && database) {
+                database.exec(`
+                    CREATE TABLE email_templates (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        subject TEXT NOT NULL,
+                        body TEXT NOT NULL,
+                        is_default INTEGER DEFAULT 0
+                    );
+                    INSERT INTO email_templates (id, name, subject, body, is_default)
+                    VALUES (
+                        '${require('crypto').randomUUID()}',
+                        'Standard Invoice',
+                        'Invoice {{invoice_no}} from {{seller_name}}',
+                        'Dear {{client_name}},\n\nPlease find attached invoice {{invoice_no}} for {{total_amount}} {{currency}}.\n\nBest regards,\n{{seller_name}}',
+                        1
+                    );
+                    INSERT INTO email_templates (id, name, subject, body, is_default)
+                    VALUES (
+                        '${require('crypto').randomUUID()}',
+                        'Overdue Notice',
+                        'Payment Reminder: Invoice {{invoice_no}} is overdue',
+                        'Dear {{client_name}},\n\nThis is a friendly reminder that payment for invoice {{invoice_no}} ({{total_amount}} {{currency}}) is now overdue.\n\nPlease process the payment at your earliest convenience.\n\nBest regards,\n{{seller_name}}',
+                        0
+                    );
+                `)
+        }
+    } catch (error) {
+        console.error('Email templates migration failed:', error)
     }
 }
 
@@ -174,6 +210,14 @@ function getInlineSchema(): string {
       branch TEXT,
       ifsc_code TEXT,
       account_number TEXT NOT NULL,
+      is_default INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS email_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body TEXT NOT NULL,
       is_default INTEGER DEFAULT 0
     );
 

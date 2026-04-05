@@ -61,6 +61,15 @@ const electronAPI = {
     cancelScheduledInvoice: (invoiceId: string) => ipcRenderer.invoke('outbox:cancel', invoiceId),
     getPendingOutboxCount: () => ipcRenderer.invoke('outbox:get-pending-count'),
 
+    // Email Templates
+    getEmailTemplates: () => ipcRenderer.invoke('db:email-templates:list'),
+    getEmailTemplate: (id: string) => ipcRenderer.invoke('db:email-templates:get', id),
+    getDefaultEmailTemplate: () => ipcRenderer.invoke('db:email-templates:get-default'),
+    createEmailTemplate: (data: any) => ipcRenderer.invoke('db:email-templates:create', data),
+    updateEmailTemplate: (id: string, data: any) => ipcRenderer.invoke('db:email-templates:update', id, data),
+    deleteEmailTemplate: (id: string) => ipcRenderer.invoke('db:email-templates:delete', id),
+    setDefaultEmailTemplate: (id: string) => ipcRenderer.invoke('db:email-templates:set-default', id),
+
     // Events
     onOutboxUpdate: (callback: (data: { pendingCount: number }) => void) => {
         const subscription = (_event: any, data: any) => callback(data)

@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
 import InvoicePreview from '../components/InvoicePreview'
+import { BaseDropdown } from '../components/BaseDropdown'
 import { DateTimePicker } from '../components/DateTimePicker'
+import { RichTextEditor } from '../components/RichTextEditor'
 
 const IconCalendar = () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -59,6 +61,9 @@ export default function InvoicePDF() {
     const [loading, setLoading] = useState(true)
     const [exporting, setExporting] = useState(false)
 
+    const [emailTemplates, setEmailTemplates] = useState<any[]>([])
+    const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
+
     const [scheduleForm, setScheduleForm] = useState({
         email: '',
         scheduledAt: '',
@@ -101,13 +106,68 @@ export default function InvoicePDF() {
         }
     }, [id, state?.openSchedule])
 
+    const applyTemplate = (template: any) => {
+        if (!invoice || !client || !sellerInfo) return
+        
+        const placeholders: Record<string, string> = {
+            '{{invoice_no}}': invoice.invoice_no || '',
+            '{{client_name}}': client.name || '',
+            '{{total_amount}}': invoice.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            '{{currency}}': invoice.currency || '',
+            '{{seller_name}}': sellerInfo.name || ''
+        }
+
+        let newSubject = template.subject
+        let newBody = template.body
+
+        Object.entries(placeholders).forEach(([key, value]) => {
+            newSubject = newSubject.replace(new RegExp(key, 'g'), value)
+            newBody = newBody.replace(new RegExp(key, 'g'), value)
+        })
+
+        setScheduleForm(prev => ({
+            ...prev,
+            subject: newSubject,
+            body: newBody
+        }))
+    }
+
+    const handleTemplateChange = (templateId: string) => {
+        setSelectedTemplateId(templateId)
+        const template = emailTemplates.find(t => t.id === templateId)
+        if (template) {
+            applyTemplate(template)
+        }
+    }
+
     // One-time initialization of schedule form
     useEffect(() => {
-        if (invoice && client && !hasInitializedForm) {
+        if (invoice && client && sellerInfo && emailTemplates.length > 0 && !hasInitializedForm) {
             let email = client.email || ''
             let scheduledAt = ''
             let subject = `Invoice ${invoice.invoice_no}`
             let body = invoice.email_body || `Please find attached Invoice ${invoice.invoice_no}. Thank you for your business.`
+
+            // If no existing body, try to use default template
+            if (!invoice.email_body) {
+                const defaultTemplate = emailTemplates.find(t => t.is_default) || emailTemplates[0]
+                if (defaultTemplate) {
+                    const placeholders: Record<string, string> = {
+                        '{{invoice_no}}': invoice.invoice_no || '',
+                        '{{client_name}}': client.name || '',
+                        '{{total_amount}}': invoice.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                        '{{currency}}': invoice.currency || '',
+                        '{{seller_name}}': sellerInfo.name || ''
+                    }
+                    subject = defaultTemplate.subject
+                    body = defaultTemplate.body
+                    Object.entries(placeholders).forEach(([key, value]) => {
+                        subject = subject.replace(new RegExp(key, 'g'), value)
+                        body = body.replace(new RegExp(key, 'g'), value)
+                    })
+                    setSelectedTemplateId(defaultTemplate.id)
+                }
+            }
 
             if (pendingDispatch) {
                 email = pendingDispatch.recipient_email || email
@@ -126,25 +186,32 @@ export default function InvoicePDF() {
                 scheduledAt = tomorrow.toISOString().slice(0, 16)
             }
 
+            // Convert plain text \n to <p> if body doesn't look like HTML
+            let finalBody = body
+            if (finalBody && !finalBody.includes('<')) {
+                finalBody = finalBody.split('\n').filter((p: string) => p.trim()).map((p: string) => `<p>${p}</p>`).join('')
+            }
+
             setScheduleForm({
                 email,
                 scheduledAt,
                 subject,
-                body
+                body: finalBody
             })
             setHasInitializedForm(true)
         }
-    }, [invoice, client, hasInitializedForm, pendingDispatch])
+    }, [invoice, client, sellerInfo, emailTemplates, hasInitializedForm, pendingDispatch])
 
     async function loadAll(invoiceId: string, showLoading = false) {
         if (showLoading) setLoading(true)
         try {
-            const [inv, outbox, profiles, sigs, seller] = await Promise.all([
+            const [inv, outbox, profiles, sigs, seller, templates] = await Promise.all([
                 window.electronAPI.getInvoice(invoiceId),
                 window.electronAPI.getOutboxItems(),
                 window.electronAPI.getPaymentProfiles(),
                 window.electronAPI.getSignatures(),
-                window.electronAPI.getSellerInfo()
+                window.electronAPI.getSellerInfo(),
+                window.electronAPI.getEmailTemplates()
             ])
 
             if (!inv) {
@@ -155,6 +222,7 @@ export default function InvoicePDF() {
             const parsed = { ...inv, items: typeof inv.items === 'string' ? JSON.parse(inv.items) : inv.items }
             setInvoice(parsed)
             setSellerInfo(seller)
+            setEmailTemplates(templates)
 
             // Find current pending dispatch if any
             const pending = outbox.find((o: any) => o.invoice_id === invoiceId && o.status === 'PENDING')
@@ -328,11 +396,24 @@ export default function InvoicePDF() {
                                         <label className="form-label">Recipient Email</label>
                                         <input type="email" className="form-input" value={scheduleForm.email} onChange={e => setScheduleForm(f => ({ ...f, email: e.target.value }))} required />
                                     </div>
-                                    <div className="form-group">
+                                    <BaseDropdown 
+                                        label="Select Template"
+                                        options={[
+                                            { label: '-- Choose a template --', value: '' },
+                                            ...emailTemplates.map(t => ({ 
+                                                label: `${t.name}${t.is_default ? ' (Default)' : ''}`, 
+                                                value: t.id 
+                                            }))
+                                        ]}
+                                        selected={selectedTemplateId}
+                                        onChange={(val: string) => handleTemplateChange(val)}
+                                        noMargin
+                                    />
+                                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                                         <label className="form-label">Subject</label>
                                         <input type="text" className="form-input" value={scheduleForm.subject} onChange={e => setScheduleForm(f => ({ ...f, subject: e.target.value }))} />
                                     </div>
-                                    <div className="form-group">
+                                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                                         <label className="form-label">Send At Date/Time</label>
                                         <DateTimePicker 
                                             value={scheduleForm.scheduledAt} 
@@ -340,9 +421,12 @@ export default function InvoicePDF() {
                                             noMargin
                                         />
                                     </div>
-                                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                                        <label className="form-label">Email Body</label>
-                                        <textarea className="form-input" value={scheduleForm.body} onChange={e => setScheduleForm(f => ({ ...f, body: e.target.value }))} rows={4} />
+                                    <div style={{ gridColumn: '1 / -1' }}>
+                                        <RichTextEditor 
+                                            label="Email Body" 
+                                            value={scheduleForm.body} 
+                                            onChange={(val: string) => setScheduleForm(f => ({ ...f, body: val }))} 
+                                        />
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '20px' }}>

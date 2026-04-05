@@ -153,29 +153,43 @@ async function sendInvoiceEmail(outboxItem: any): Promise<void> {
     const filename = `${safeInvoiceNo}.pdf`
 
     const subject = outboxItem.subject || `Invoice ${invoice.invoice_no}`
-    const bodyText = outboxItem.body || `Please find attached invoice ${invoice.invoice_no}.`
+    const bodyHtml = outboxItem.body || `<p>Please find attached invoice ${invoice.invoice_no}.</p>`
+    // Create plain text fallback by stripping HTML tags
+    const bodyText = bodyHtml.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim()
 
-    // Build RFC 2822 message with PDF attachment
-    const boundary = 'invoice_boundary_' + Date.now()
+    // Build RFC 2822 message with PDF attachment and HTML body
+    const mixedBoundary = 'mixed_boundary_' + crypto.randomBytes(8).toString('hex')
+    const altBoundary = 'alt_boundary_' + crypto.randomBytes(8).toString('hex')
+
     const rawMessage = [
         `From: me`,
         `To: ${outboxItem.recipient_email}`,
         `Subject: ${subject}`,
         `MIME-Version: 1.0`,
-        `Content-Type: multipart/mixed; boundary="${boundary}"`,
+        `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
         '',
-        `--${boundary}`,
+        `--${mixedBoundary}`,
+        `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+        '',
+        `--${altBoundary}`,
         `Content-Type: text/plain; charset="UTF-8"`,
         '',
         bodyText,
         '',
-        `--${boundary}`,
+        `--${altBoundary}`,
+        `Content-Type: text/html; charset="UTF-8"`,
+        '',
+        `<html><body>${bodyHtml}</body></html>`,
+        '',
+        `--${altBoundary}--`,
+        '',
+        `--${mixedBoundary}`,
         `Content-Type: application/pdf; name="${filename}"`,
         `Content-Disposition: attachment; filename="${filename}"`,
         `Content-Transfer-Encoding: base64`,
         '',
         pdfBase64,
-        `--${boundary}--`
+        `--${mixedBoundary}--`
     ].join('\r\n')
 
     const encodedMessage = Buffer.from(rawMessage).toString('base64url')
