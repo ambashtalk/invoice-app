@@ -12,7 +12,7 @@ export function getDatabase(): Database.Database {
 }
 
 export function initDatabase(): void {
-    const dbPath = join(app.getPath('userData'), 'invoice-app.db')
+    const dbPath = process.env.DB_PATH || join(app.getPath('userData'), 'invoice-app.db')
     db = new Database(dbPath)
 
     // Foreign keys are disabled for simpler schema management as requested

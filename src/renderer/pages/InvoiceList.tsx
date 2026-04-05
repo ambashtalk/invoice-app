@@ -528,14 +528,15 @@ export default function InvoiceList() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <span className="card-meta">Showing {paginatedInvoices.length} of {processedInvoices.length}</span>
                         {!isMobile && totalPages > 1 && (
-                            <form onSubmit={handleJumpPage} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span className="card-meta">Go to:</span>
+                            <form onSubmit={handleJumpPage} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+                                <span className="card-meta" style={{ whiteSpace: 'nowrap' }}>Go to:</span>
                                 <BaseInput 
                                     type="number" 
                                     style={{ width: '60px', height: '32px', margin: 0, padding: '4px 8px', fontSize: '12px' }} 
                                     value={jumpPage}
                                     onChange={v => setJumpPage(v)}
                                     placeholder="Pg"
+                                    noMargin
                                 />
                             </form>
                         )}

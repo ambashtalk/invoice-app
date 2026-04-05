@@ -522,11 +522,11 @@ export default function InvoiceEditor() {
                                 <tbody>{formData.items.map((item, i) => (
                                     <tr key={i}>
                                         <td style={{ verticalAlign: 'middle', color: 'var(--color-text-muted)' }}>{item.slNo}</td>
-                                        <td style={{ verticalAlign: 'middle', paddingLeft: '0' }}><BaseInput value={item.description} onChange={v => {
+                                        <td style={{ verticalAlign: 'middle', paddingLeft: '0' }}><BaseInput placeholder="Description" value={item.description} onChange={v => {
                                             const items = formData.items.map((it, idx) => idx === i ? { ...it, description: v } : it);
                                             setFormData({ ...formData, items });
                                         }} disabled={isReadOnly} style={{ margin: 0 }} noMargin /></td>
-                                        <td style={{ verticalAlign: 'middle' }}><BaseInput type="number" value={item.amount || ''} onChange={v => {
+                                        <td style={{ verticalAlign: 'middle' }}><BaseInput type="number" placeholder="Amount" value={item.amount || ''} onChange={v => {
                                             const items = formData.items.map((it, idx) => idx === i ? { ...it, amount: parseFloat(v) || 0 } : it);
                                             setFormData({ ...formData, items });
                                         }} disabled={isReadOnly} style={{ margin: 0, textAlign: 'right' }} noMargin /></td>
