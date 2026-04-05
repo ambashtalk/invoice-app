@@ -32,7 +32,7 @@ export default function Layout() {
             {/* Mobile Header (Branding & Status Only) */}
             <header className="mobile-header">
                 <div style={{ width: '40px' }} /> {/* Spacer */}
-                <h1 className="logo-small">AutomateInvoice</h1>
+                <h1 className="logo-small">Prism Invoice</h1>
                 <div className={`network-status ${isOnline ? 'online' : 'offline'}`} style={{ width: '40px', justifyContent: 'center' }}>
                     <span className="status-dot"></span>
                 </div>
@@ -41,7 +41,7 @@ export default function Layout() {
             {/* Desktop Sidebar (Hidden on Mobile) */}
             <aside className="sidebar">
                 <div className="sidebar-header">
-                    <h1 className="logo">AutomateInvoice</h1>
+                    <h1 className="logo">Prism Invoice</h1>
                 </div>
 
                 <nav className="sidebar-nav">

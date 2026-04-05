@@ -9,7 +9,7 @@ import * as zlib from 'zlib'
  * - Uploads PDFs to a user-visible 'Invoices' folder
  */
 
-const APP_FOLDER_NAME = 'AutomateInvoice-Data'
+const APP_FOLDER_NAME = 'PrismInvoice-Data'
 let appFolderId: string | null = null
 let syncInterval: NodeJS.Timeout | null = null;
 

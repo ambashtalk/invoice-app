@@ -8,6 +8,7 @@ import { initDatabase } from './database'
 import { registerIpcHandlers } from './ipc'
 import { startOutboxPoller, stopOutboxPoller } from './services/outbox'
 import { startPeriodicSync } from './sync/drive-sync'
+import { setupUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -60,6 +61,9 @@ app.whenReady().then(() => {
 
     // Start background quiet-sync with Google Drive
     startPeriodicSync()
+
+    // Setup auto-updates
+    setupUpdater()
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

@@ -1,7 +1,8 @@
 {
-  "name": "invoice-app",
+  "name": "prism-invoice",
   "version": "1.0.0",
   "description": "Local-first invoice management for freelancers",
+  "productName": "Prism Invoice",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -11,15 +12,55 @@
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux"
   },
   "keywords": [
     "invoice",
     "electron",
     "freelance"
   ],
-  "author": "",
+  "author": "ambashtalk",
   "license": "ISC",
+  "build": {
+    "appId": "com.ambashtalk.prism-invoice",
+    "directories": {
+      "output": "dist"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ambashtalk",
+      "repo": "invoice-app"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.business",
+      "target": [
+        "dmg"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "rpm"
+      ],
+      "category": "Office"
+    }
+  },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
     "@playwright/test": "^1.59.1",
@@ -29,6 +70,7 @@
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.1.2",
     "electron": "^40.0.0",
+    "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
     "playwright": "^1.59.1",
     "react": "^19.2.3",
@@ -45,6 +87,7 @@
     "@tiptap/starter-kit": "^3.22.2",
     "better-sqlite3": "^12.6.2",
     "date-fns": "^4.1.0",
+    "electron-updater": "^6.8.3",
     "googleapis": "^170.1.0",
     "sharp": "^0.34.5",
     "uuid": "^13.0.0"
