@@ -1,7 +1,6 @@
 # directories
 node_modules/
 .vscode/
-docs/
 out/
 dist/
 
