@@ -4,12 +4,6 @@ import { useToast } from '../contexts/ToastContext'
 import InvoicePreview from '../components/InvoicePreview'
 import { DateTimePicker } from '../components/DateTimePicker'
 
-const IconCopy = () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-    </svg>
-)
-
 const IconCalendar = () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
@@ -54,7 +48,6 @@ export default function InvoicePDF() {
     const { state } = useLocation()
     const { success, error, warning, info } = useToast()
 
-    const previewData = state?.previewData // Unsaved edits from InvoiceEditor
     const fromMode = state?.fromMode // 'edit' or 'view'
     const fromDashboard = state?.fromDashboard
 
@@ -73,6 +66,7 @@ export default function InvoicePDF() {
         body: ''
     })
     const [showSchedulePanel, setShowSchedulePanel] = useState(false)
+    const [pendingDispatch, setPendingDispatch] = useState<any>(null)
     const [hasInitializedForm, setHasInitializedForm] = useState(false)
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
 
@@ -109,28 +103,45 @@ export default function InvoicePDF() {
 
     // One-time initialization of schedule form
     useEffect(() => {
-        if (invoice && client && !hasInitializedForm && !previewData) {
-            const today = new Date()
-            const tomorrow = new Date(today)
-            tomorrow.setDate(today.getDate() + 1)
-            tomorrow.setHours(tomorrow.getHours(), 0, 0, 0)
-            const formattedDate = tomorrow.toISOString().slice(0, 16)
+        if (invoice && client && !hasInitializedForm) {
+            let email = client.email || ''
+            let scheduledAt = ''
+            let subject = `Invoice ${invoice.invoice_no}`
+            let body = invoice.email_body || `Please find attached Invoice ${invoice.invoice_no}. Thank you for your business.`
+
+            if (pendingDispatch) {
+                email = pendingDispatch.recipient_email || email
+                subject = pendingDispatch.subject || subject
+                body = pendingDispatch.body || body
+                if (pendingDispatch.scheduled_at) {
+                    scheduledAt = new Date(pendingDispatch.scheduled_at).toISOString().slice(0, 16)
+                }
+            }
+
+            if (!scheduledAt) {
+                const today = new Date()
+                const tomorrow = new Date(today)
+                tomorrow.setDate(today.getDate() + 1)
+                tomorrow.setHours(tomorrow.getHours(), 0, 0, 0)
+                scheduledAt = tomorrow.toISOString().slice(0, 16)
+            }
 
             setScheduleForm({
-                email: client.email || '',
-                scheduledAt: formattedDate,
-                subject: `Invoice ${invoice.invoice_no}`,
-                body: invoice.email_body || `Please find attached Invoice ${invoice.invoice_no}. Thank you for your business.`
+                email,
+                scheduledAt,
+                subject,
+                body
             })
             setHasInitializedForm(true)
         }
-    }, [invoice, client, hasInitializedForm, previewData])
+    }, [invoice, client, hasInitializedForm, pendingDispatch])
 
     async function loadAll(invoiceId: string, showLoading = false) {
         if (showLoading) setLoading(true)
         try {
-            const [inv, profiles, sigs, seller] = await Promise.all([
+            const [inv, outbox, profiles, sigs, seller] = await Promise.all([
                 window.electronAPI.getInvoice(invoiceId),
+                window.electronAPI.getOutboxItems(),
                 window.electronAPI.getPaymentProfiles(),
                 window.electronAPI.getSignatures(),
                 window.electronAPI.getSellerInfo()
@@ -142,14 +153,12 @@ export default function InvoicePDF() {
             }
 
             const parsed = { ...inv, items: typeof inv.items === 'string' ? JSON.parse(inv.items) : inv.items }
-
-            if (previewData) {
-                setInvoice({ ...parsed, ...previewData })
-            } else {
-                setInvoice(parsed)
-            }
-            
+            setInvoice(parsed)
             setSellerInfo(seller)
+
+            // Find current pending dispatch if any
+            const pending = outbox.find((o: any) => o.invoice_id === invoiceId && o.status === 'PENDING')
+            setPendingDispatch(pending || null)
 
             const defaultProfile = profiles.find((p: any) => p.is_default) || profiles[0] || null
             setPaymentProfile(defaultProfile)
@@ -238,7 +247,7 @@ export default function InvoicePDF() {
             return
         }
         if (fromMode === 'edit') {
-            navigate(`/invoices/${id}/edit`, { state: { restoredData: previewData } })
+            navigate(`/invoices/${id}/edit`)
         } else {
             navigate(`/invoices/${id}`)
         }
@@ -250,7 +259,6 @@ export default function InvoicePDF() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-            {/* Stick Header - Unified with Editor */}
             <div style={{ flexShrink: 0, paddingBottom: '16px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-primary)', zIndex: 10, marginTop: '-24px', paddingTop: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -262,19 +270,11 @@ export default function InvoicePDF() {
                             {invoice?.invoice_no && <span className="card-meta" style={{ fontWeight: 600, color: 'var(--color-accent)' }}>{invoice.invoice_no}</span>}
                             {!isMobile && invoice?.invoice_no && <span style={{ color: 'var(--color-border)' }}>|</span>}
                             {!isMobile && <span className="page-subtitle" style={{ margin: 0 }}>Review the document preview before dispatch</span>}
-                            {invoice?.status === 'SCHEDULED' && invoice?.scheduled_at && (
-                                <>
-                                    {!isMobile && <span style={{ color: 'var(--color-border)' }}>|</span>}
-                                    <span className="page-subtitle" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>
-                                        Scheduled for {new Date(invoice.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-                                    </span>
-                                </>
-                            )}
                         </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <button type="button" onClick={handleBack} className="btn btn-ghost" style={{ padding: '0 12px' }} title="Return to Dashboard">←</button>
+                        <button type="button" onClick={handleBack} className="btn btn-ghost" style={{ padding: '0 12px' }} title="Return to Previous Page">←</button>
                         
                         {(invoice.status === 'DRAFT') && (
                             <button onClick={() => navigate(`/invoices/${id}/edit`)} className="btn btn-secondary" title="Edit line items and details">
@@ -282,10 +282,10 @@ export default function InvoicePDF() {
                             </button>
                         )}
                         
-                        <button onClick={handleExportPDF} className="btn btn-secondary" disabled={exporting} title="Generate and Download PDF">
+                        <button onClick={handleExportPDF} className="btn btn-secondary" disabled={exporting}>
                             {exporting ? 'Exporting...' : 'Export PDF'}
                         </button>
-                        
+
                         {invoice.status === 'DRAFT' && (
                             <>
                                 <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-secondary" title="Set dispatch date and time">
@@ -296,7 +296,7 @@ export default function InvoicePDF() {
                                 </button>
                             </>
                         )}
-                        
+
                         {invoice.status === 'SCHEDULED' && (
                             <>
                                 <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-primary" title="Update dispatch date and time">
@@ -317,16 +317,12 @@ export default function InvoicePDF() {
                 </div>
             </div>
 
-            {/* Scrollable Content Area */}
             <div style={{ flex: 1, overflowY: 'auto', background: 'var(--color-bg-dark)', padding: 'var(--spacing-xl)' }}>
                 <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-                    {/* Interactive feedback is now handled via global toasts */}
-
-                    {/* Schedule Panel inside the scrollable flow */}
                     {showSchedulePanel && (
-                        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)', borderRadius: '16px', padding: '24px', paddingBottom: '200px', marginBottom: '24px', backdropFilter: 'blur(10px)', position: 'relative', zIndex: 100 }}>
+                        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)', borderRadius: '16px', padding: '24px', marginBottom: '24px', backdropFilter: 'blur(10px)', position: 'relative', zIndex: 100 }}>
                             <h3 style={{ marginBottom: '16px' }}>Schedule Email Dispatch</h3>
-                            <form onSubmit={handleScheduleSend}>
+                            <form onSubmit={(e) => handleScheduleSend(e)}>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                                     <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                                         <label className="form-label">Recipient Email</label>
@@ -358,7 +354,6 @@ export default function InvoicePDF() {
                         </div>
                     )}
 
-                    {/* The A4 Paper - Zero chance of overlap now */}
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                         <div style={{ boxShadow: '0 10px 40px rgba(0,0,0,0.15)', background: 'white', borderRadius: '4px', overflow: 'hidden' }}>
                             <InvoicePreview
@@ -370,8 +365,6 @@ export default function InvoicePDF() {
                             />
                         </div>
                     </div>
-
-                    <div style={{ height: '40px' }} /> {/* Bottom Spacer */}
                 </div>
             </div>
         </div>

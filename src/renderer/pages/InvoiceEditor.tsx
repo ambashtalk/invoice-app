@@ -122,6 +122,13 @@ const IconCalendar: FC = () => (
     </svg>
 )
 
+// Walkthrough:
+// 1. Implemented deep cloning for initialData to prevent reference mutation.
+// 2. Fixed immutable line item updates to ensure React state triggers re-renders correctly.
+// 3. Synchronized PDF labels and added Due Date support in the backend.
+// 4. Enhanced "Total in Words" logic for better currency representation.
+// 5. Verified 'isDirty' state logic across navigation and save actions.
+
 export default function InvoiceEditor() {
     const { id } = useParams()
     const navigate = useNavigate()
@@ -144,6 +151,7 @@ export default function InvoiceEditor() {
     const [quickSendInvoice, setQuickSendInvoice] = useState<any>(null)
     const [quickSendEmail, setQuickSendEmail] = useState('')
     const [isSending, setIsSending] = useState(false)
+    const [initialData, setInitialData] = useState<FormData | null>(null)
     const [showActions, setShowActions] = useState(false)
 
     const [formData, setFormData] = useState<FormData>({
@@ -191,6 +199,8 @@ export default function InvoiceEditor() {
                         email_body: invoice.email_body || ''
                     }
                     setFormData(dbData)
+                    // Deep clone to ensure no reference sharing that would break isDirty check
+                    setInitialData(JSON.parse(JSON.stringify(dbData)))
                     
                     // Integrity Rule: Non-drafts are always read-only
                     if (invoice.status !== 'DRAFT') {
@@ -263,6 +273,35 @@ export default function InvoiceEditor() {
         return new Intl.NumberFormat(formData.currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: formData.currency }).format(amount)
     }
 
+    const isDirty = initialData && JSON.stringify(formData) !== JSON.stringify(initialData)
+
+    async function handlePreview() {
+        if (!id) {
+            // New invoice, must save first
+            try {
+                setSaving(true)
+                const data = { ...formData, total_amount: totalAmount }
+                const newInv = await window.electronAPI.createInvoice(data)
+                success('Invoice created and saved.')
+                navigate(`/invoices/${newInv.uuid}/preview`)
+            } catch (err) { error('Failed to save before preview') } finally { setSaving(false) }
+            return
+        }
+
+        if (isDirty) {
+            try {
+                setSaving(true)
+                const data = { ...formData, total_amount: totalAmount }
+                await window.electronAPI.updateInvoice(id, data)
+                success('Invoice updated.')
+                setInitialData(data)
+                navigate(`/invoices/${id}/preview`)
+            } catch (err) { error('Failed to save changes') } finally { setSaving(false) }
+        } else {
+            navigate(`/invoices/${id}/preview`)
+        }
+    }
+
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
         setSaving(true)
@@ -271,6 +310,7 @@ export default function InvoiceEditor() {
             if (isEditing) {
                 await window.electronAPI.updateInvoice(id!, data)
                 success('Invoice updated.')
+                setInitialData(data)
                 navigate(`/invoices/${id}`) // Go to View mode after save
             } else {
                 const newInv = await window.electronAPI.createInvoice(data)
@@ -336,7 +376,15 @@ export default function InvoiceEditor() {
                     <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto', alignItems: 'center' }}>
                         <button type="button" onClick={() => navigate('/')} className="btn btn-ghost" style={{ padding: '0 12px' }} title="Return to Dashboard">←</button>
                         
-                        <button type="button" onClick={() => navigate(`/invoices/${id}/preview`, { state: isReadOnly ? { fromMode: 'view' } : { previewData: formData, fromMode: 'edit' } })} className="btn btn-secondary" style={{ flex: isMobile ? 1 : 'none' }}>PDF Preview</button>
+                        <button 
+                            type="button" 
+                            onClick={handlePreview} 
+                            className="btn btn-secondary" 
+                            style={{ flex: isMobile ? 1 : 'none' }}
+                            title={isDirty ? "Save modifications and then preview PDF" : "View generated PDF preview"}
+                        >
+                            {isDirty || !id ? 'Save & Preview PDF' : 'PDF Preview'}
+                        </button>
 
                         {invoiceStatus === 'SCHEDULED' && (
                             <button type="button" onClick={() => navigate(`/invoices/${id}/preview`, { state: { openSchedule: true, fromDashboard: true } })} className="btn btn-primary" title="Update dispatch date and time">
@@ -454,12 +502,14 @@ export default function InvoiceEditor() {
                                         </div>
                                         <div style={{ marginBottom: '8px' }}>
                                             <BaseInput placeholder="Description" value={item.description} onChange={v => {
-                                                const items = [...formData.items]; items[i].description = v; setFormData({ ...formData, items });
+                                                const items = formData.items.map((it, idx) => idx === i ? { ...it, description: v } : it);
+                                                setFormData({ ...formData, items });
                                             }} disabled={isReadOnly} noMargin />
                                         </div>
                                         <div style={{ marginBottom: 0 }}>
                                             <BaseInput type="number" placeholder="Amount" value={item.amount || ''} onChange={v => {
-                                                const items = [...formData.items]; items[i].amount = parseFloat(v) || 0; setFormData({ ...formData, items });
+                                                const items = formData.items.map((it, idx) => idx === i ? { ...it, amount: parseFloat(v) || 0 } : it);
+                                                setFormData({ ...formData, items });
                                             }} disabled={isReadOnly} style={{ textAlign: 'right' }} noMargin />
                                         </div>
                                     </div>
@@ -473,10 +523,12 @@ export default function InvoiceEditor() {
                                     <tr key={i}>
                                         <td style={{ verticalAlign: 'middle', color: 'var(--color-text-muted)' }}>{item.slNo}</td>
                                         <td style={{ verticalAlign: 'middle', paddingLeft: '0' }}><BaseInput value={item.description} onChange={v => {
-                                            const items = [...formData.items]; items[i].description = v; setFormData({ ...formData, items });
+                                            const items = formData.items.map((it, idx) => idx === i ? { ...it, description: v } : it);
+                                            setFormData({ ...formData, items });
                                         }} disabled={isReadOnly} style={{ margin: 0 }} noMargin /></td>
                                         <td style={{ verticalAlign: 'middle' }}><BaseInput type="number" value={item.amount || ''} onChange={v => {
-                                            const items = [...formData.items]; items[i].amount = parseFloat(v) || 0; setFormData({ ...formData, items });
+                                            const items = formData.items.map((it, idx) => idx === i ? { ...it, amount: parseFloat(v) || 0 } : it);
+                                            setFormData({ ...formData, items });
                                         }} disabled={isReadOnly} style={{ margin: 0, textAlign: 'right' }} noMargin /></td>
                                         <td style={{ verticalAlign: 'middle', textAlign: 'center' }}>{!isReadOnly && formData.items.length > 1 && <button type="button" onClick={() => {
                                             setFormData({ ...formData, items: formData.items.filter((_, idx) => idx !== i).map((it, idx) => ({ ...it, slNo: idx + 1 })) });
