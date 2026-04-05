@@ -20,18 +20,54 @@ export interface GoogleCredentials {
 
 function loadCredentials(): GoogleCredentials | null {
     const credPath = join(app.getPath('userData'), 'credentials.json')
-    let credsJson = null
-    if (!existsSync(credPath)) {
-        // Also check the config directory
-        const configPath = join(app.getAppPath(), 'config', 'credentials.json')
-        if (!existsSync(configPath)) return null
-        credsJson = JSON.parse(readFileSync(configPath, 'utf-8'))
-    } else {
-        credsJson = JSON.parse(readFileSync(credPath, 'utf-8'))
+    if (existsSync(credPath)) {
+        try {
+            const credsJson = JSON.parse(readFileSync(credPath, 'utf-8'))
+            return credsJson.installed || credsJson.web || credsJson
+        } catch (e) {
+            console.error('Invalid custom credentials.json', e)
+        }
+    }
+
+    // Fallback 1: Environment Variables (Vite main process)
+    const env = (import.meta as any).env || process.env
+    if (env.VITE_GOOGLE_CLIENT_ID && env.VITE_GOOGLE_CLIENT_SECRET) {
+        return {
+            client_id: env.VITE_GOOGLE_CLIENT_ID,
+            client_secret: env.VITE_GOOGLE_CLIENT_SECRET
+        }
+    }
+
+    // Fallback 2: the config directory
+    const configPath = join(app.getAppPath(), 'config', 'credentials.json')
+    if (existsSync(configPath)) {
+        try {
+            const credsJson = JSON.parse(readFileSync(configPath, 'utf-8'))
+            return credsJson.installed || credsJson.web || credsJson
+        } catch (e) {}
     }
     
-    // Google's credentials.json wraps the keys in "installed" or "web"
-    return credsJson.installed || credsJson.web || credsJson
+    return null
+}
+
+export function hasCustomCredentials(): boolean {
+    return existsSync(join(app.getPath('userData'), 'credentials.json'))
+}
+
+export function saveCustomCredentials(filePath: string): void {
+    const credPath = join(app.getPath('userData'), 'credentials.json')
+    const content = readFileSync(filePath, 'utf-8')
+    // Validate it's JSON
+    JSON.parse(content)
+    writeFileSync(credPath, content, 'utf-8')
+}
+
+export function deleteCustomCredentials(): void {
+    const credPath = join(app.getPath('userData'), 'credentials.json')
+    if (existsSync(credPath)) {
+        const { rmSync } = require('fs')
+        rmSync(credPath)
+    }
 }
 
 function saveTokens(tokens: object): void {

@@ -76,6 +76,8 @@ export default function Settings() {
     const [sigUploading, setSigUploading] = useState(false)
     const [googleLoading, setGoogleLoading] = useState(false)
     const [syncResult, setSyncResult] = useState<{ synced: number; errors: string[] } | null>(null)
+    const [hasCustomAuth, setHasCustomAuth] = useState(false)
+    const [showAdvanced, setShowAdvanced] = useState(false)
 
     useEffect(() => {
         loadData()
@@ -83,18 +85,20 @@ export default function Settings() {
 
     async function loadData() {
         try {
-            const [profilesData, signaturesData, templatesData, seller, connected] = await Promise.all([
+            const [profilesData, signaturesData, templatesData, seller, connected, customAuth] = await Promise.all([
                 window.electronAPI.getPaymentProfiles(),
                 window.electronAPI.getSignatures(),
                 window.electronAPI.getEmailTemplates(),
                 window.electronAPI.getSellerInfo(),
-                window.electronAPI.isGoogleConnected()
+                window.electronAPI.isGoogleConnected(),
+                window.electronAPI.hasCustomCredentials()
             ])
             setProfiles(profilesData)
             setSignatures(signaturesData)
             setEmailTemplates(templatesData)
             if (seller) setSellerForm(seller)
             setGoogleConnected(connected)
+            setHasCustomAuth(customAuth)
         } catch (error) {
             console.error('Failed to load settings:', error)
         } finally {
@@ -274,6 +278,29 @@ export default function Settings() {
             alert(`Sync failed: ${error.message}`)
         } finally {
             setGoogleLoading(false)
+        }
+    }
+
+    async function handleUploadCredentials() {
+        try {
+            const uploadSuccess = await window.electronAPI.uploadCustomCredentials()
+            if (uploadSuccess) {
+                success('Custom credentials loaded successfully.')
+                loadData()
+            }
+        } catch (error: any) {
+            toastError('Failed to upload credentials.')
+        }
+    }
+
+    async function handleDeleteCredentials() {
+        if (!confirm('Remove custom credentials? You will need to reconnect Google.')) return
+        try {
+            await window.electronAPI.deleteCustomCredentials()
+            loadData()
+            success('Custom credentials removed.')
+        } catch (error: any) {
+            toastError('Failed to remove credentials.')
         }
     }
 
@@ -660,14 +687,50 @@ export default function Settings() {
                             )}
 
                             {!googleConnected && (
-                                <div className="card" style={{ opacity: 0.7 }}>
+                                <div className="card" style={{ opacity: 0.8 }}>
                                     <p className="card-meta">
-                                        To use Google integration, you need to add a <code>credentials.json</code> file
-                                        (downloaded from Google Cloud Console) to your app's userData folder.
-                                        See the implementation plan for setup instructions.
+                                        Google integration enables <strong>Gmail sending</strong> and <strong>Drive metadata sync</strong>.
+                                        Click Connect to authorize the app securely.
                                     </p>
                                 </div>
                             )}
+
+                            {/* Advanced BYOK Settings */}
+                            <div style={{ marginTop: 'var(--spacing-xl)' }}>
+                                <button 
+                                    onClick={() => setShowAdvanced(!showAdvanced)} 
+                                    style={{ 
+                                        background: 'none', border: 'none', cursor: 'pointer', 
+                                        color: 'var(--color-meta, #666)', fontSize: '0.875rem', 
+                                        display: 'flex', alignItems: 'center', gap: '4px' 
+                                    }}
+                                >
+                                    {showAdvanced ? '▼ Hide Advanced' : '▶ Show Advanced (Bring Your Own Key)'}
+                                </button>
+                                
+                                {showAdvanced && (
+                                    <div className="card" style={{ marginTop: 'var(--spacing-md)', border: '1px dashed var(--border-color)' }}>
+                                        <h3 style={{ marginBottom: 'var(--spacing-sm)' }}>Custom API Credentials</h3>
+                                        <p className="card-meta" style={{ marginBottom: 'var(--spacing-md)' }}>
+                                            By default, the app uses built-in Google Cloud credentials. If you hit API limits or prefer complete privacy, 
+                                            you can provide your own <code>credentials.json</code> from Google Cloud Console.
+                                        </p>
+                                        
+                                        {hasCustomAuth ? (
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--spacing-sm)', background: 'var(--bg-layer-2)', borderRadius: '4px' }}>
+                                                <span><span style={{ color: 'var(--color-success)', marginRight: '8px' }}>✓</span> Custom credentials loaded</span>
+                                                <button onClick={handleDeleteCredentials} className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }}>
+                                                    Remove Custom Key
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button onClick={handleUploadCredentials} className="btn btn-secondary">
+                                                Upload credentials.json
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>

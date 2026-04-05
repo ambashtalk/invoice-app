@@ -38,7 +38,10 @@ import {
     startOAuthFlow,
     getAuthUrl,
     isGoogleConnected,
-    disconnectGoogle
+    disconnectGoogle,
+    hasCustomCredentials,
+    saveCustomCredentials,
+    deleteCustomCredentials
 } from './auth/google-auth'
 import { syncInvoicesToDrive } from './sync/drive-sync'
 import { scheduleInvoice, getOutboxItems, cancelScheduledInvoice, getPendingOutboxCount } from './services/outbox'
@@ -179,14 +182,30 @@ export function registerIpcHandlers(): void {
 
     // Google Auth
     ipcMain.handle('google:is-connected', () => isGoogleConnected())
+    ipcMain.handle('google:has-custom-credentials', () => hasCustomCredentials())
     ipcMain.handle('google:get-auth-url', () => getAuthUrl())
     ipcMain.handle('google:connect', async () => {
         // Open the auth URL in the default browser
         const authUrl = getAuthUrl()
-        if (!authUrl) throw new Error('No credentials.json found')
+        if (!authUrl) throw new Error('No credentials found. Application might not be configured correctly.')
         shell.openExternal(authUrl)
         // Start the loopback server to catch the callback
         return startOAuthFlow()
+    })
+    ipcMain.handle('google:upload-credentials', async () => {
+        const result = await dialog.showOpenDialog({
+            title: 'Select credentials.json',
+            filters: [{ name: 'JSON', extensions: ['json'] }],
+            properties: ['openFile']
+        })
+        if (result.canceled || result.filePaths.length === 0) return false
+        saveCustomCredentials(result.filePaths[0])
+        return true
+    })
+    ipcMain.handle('google:delete-credentials', () => {
+        deleteCustomCredentials()
+        disconnectGoogle()
+        return true
     })
     ipcMain.handle('google:disconnect', () => {
         disconnectGoogle()

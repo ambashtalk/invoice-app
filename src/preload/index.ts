@@ -47,8 +47,11 @@ const electronAPI = {
 
     // Google
     isGoogleConnected: () => ipcRenderer.invoke('google:is-connected'),
+    hasCustomCredentials: () => ipcRenderer.invoke('google:has-custom-credentials'),
     getAuthUrl: () => ipcRenderer.invoke('google:get-auth-url'),
     connectGoogle: () => ipcRenderer.invoke('google:connect'),
+    uploadCustomCredentials: () => ipcRenderer.invoke('google:upload-credentials'),
+    deleteCustomCredentials: () => ipcRenderer.invoke('google:delete-credentials'),
     disconnectGoogle: () => ipcRenderer.invoke('google:disconnect'),
 
     // Drive
