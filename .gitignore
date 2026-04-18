@@ -4,6 +4,12 @@ node_modules/
 out/
 dist/
 
+# macOS
+.DS_Store
+
 # files
 .env
 config/credentials.json
+*.pdf
+*.png
+*.jpg
