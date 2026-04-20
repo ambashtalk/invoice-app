@@ -30,6 +30,6 @@ src/
 ## Workflow
 
 - All non-trivial changes require a `PLAN.md` in the root directory
-- Use `CLAUDE.md` for architectural decisions and tech stack direction
+- Use `ANTIGRAVITY.md` for architectural decisions and tech stack direction
 - New features must align with local-first design philosophy
 - Crucial: Maintain separation between client-side UI and server-side logic

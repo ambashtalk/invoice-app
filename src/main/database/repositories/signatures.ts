@@ -63,17 +63,3 @@ export function setDefaultSignature(id: string): boolean {
     const result = db.prepare('UPDATE signatures SET is_default = 1, updated_at = ? WHERE id = ?').run(Date.now(), id)
     return result.changes > 0
 }
-
-export function resolveSignatureConflict(id: string, resolvedData: any): Signature {
-    const db = getDatabase()
-    db.prepare(`
-        UPDATE signatures SET
-        name = ?, image_blob = ?, updated_at = ?,
-        has_conflict = 0, conflict_data = NULL, last_synced_at = 0
-        WHERE id = ?
-    `).run(resolvedData.name, resolvedData.image_blob, Date.now(), id)
-
-    const resolved = getSignature(id)!
-    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('signatures', resolved, 'id')).catch(() => {})
-    return resolved
-}

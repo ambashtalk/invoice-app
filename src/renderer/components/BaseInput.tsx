@@ -15,7 +15,7 @@ export const BaseInput: FC<BaseInputProps> = ({ label, onChange, type = 'text', 
     const inputClasses = `form-input ${type === 'number' ? 'num-no-spinner' : ''} ${error ? 'border-error' : ''} ${className}`.trim()
 
     return (
-        <div className={noMargin ? '' : 'form-group'} style={{ width: noMargin ? 'auto' : '100%' }}>
+        <div className={noMargin ? '' : 'form-group'} style={{ width: '100%' }}>
             {label && <label className="form-label">{label}</label>}
             <input 
                 type={type} 

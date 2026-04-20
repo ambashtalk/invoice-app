@@ -74,23 +74,3 @@ export function deleteClient(id: string): boolean {
     const result = db.prepare('DELETE FROM clients WHERE uuid = ?').run(id)
     return result.changes > 0
 }
-
-export function resolveClientConflict(uuid: string, resolvedData: any): Client {
-    const db = getDatabase()
-    db.prepare(`
-        UPDATE clients SET
-        name = ?, email = ?, address = ?, gstin = ?, updated_at = ?,
-        has_conflict = 0, conflict_data = NULL, last_synced_at = 0
-        WHERE uuid = ?
-    `).run(
-        resolvedData.name,
-        resolvedData.email || null,
-        resolvedData.address || null,
-        resolvedData.gstin || null,
-        Date.now(),
-        uuid
-    )
-    const resolved = getClient(uuid)!
-    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('clients', resolved, 'uuid')).catch(() => {})
-    return resolved
-}

@@ -6,31 +6,31 @@ import {
     updateInvoice,
     deleteInvoice,
     markAsPaid,
-    markAsCancelled,
-    resolveInvoiceConflict
+    markAsCancelled
 } from './database/repositories/invoices'
+
 import {
     getClients,
     getClient,
     createClient,
     updateClient,
-    deleteClient,
-    resolveClientConflict
+    deleteClient
 } from './database/repositories/clients'
+
 import {
     getSignatures,
     createSignature,
     deleteSignature,
-    setDefaultSignature,
-    resolveSignatureConflict
+    setDefaultSignature
 } from './database/repositories/signatures'
+
 import {
     getPaymentProfiles,
     createPaymentProfile,
     updatePaymentProfile,
-    setDefaultPaymentProfile,
-    resolvePaymentProfileConflict
+    setDefaultPaymentProfile
 } from './database/repositories/payment-profiles'
+
 import { processSignatureFromBase64 } from './signature-processor'
 import { getExchangeRate } from './services/currency'
 import { generateInvoicePDF } from './pdf'
@@ -39,15 +39,19 @@ import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import {
-    startOAuthFlow,
-    getAuthUrl,
     isGoogleConnected,
+    getAuthUrl,
+    startOAuthFlow,
+    saveCustomCredentials,
+    deleteCustomCredentials,
     disconnectGoogle,
     hasCustomCredentials,
-    saveCustomCredentials,
-    deleteCustomCredentials
+    getUserProfile
 } from './auth/google-auth'
-import { syncTableToDrive } from './sync/drive-sync'
+import { getReceivedByMonth } from './database/repositories/reports'
+import { syncTableToDrive, lockInvoice, unlockInvoice, isInvoiceLocked, wipeLocalData } from './sync/drive-sync'
+import { getDeviceId } from './utils/device-id'
+
 import { scheduleInvoice, getOutboxItems, cancelScheduledInvoice, getPendingOutboxCount } from './services/outbox'
 import {
     getEmailTemplates,
@@ -56,9 +60,9 @@ import {
     updateEmailTemplate,
     deleteEmailTemplate,
     setDefaultEmailTemplate,
-    getDefaultEmailTemplate,
-    resolveEmailTemplateConflict
+    getDefaultEmailTemplate
 } from './database/repositories/email-templates'
+
 
 export function registerIpcHandlers(): void {
     // Email template handlers
@@ -77,13 +81,10 @@ export function registerIpcHandlers(): void {
     ipcMain.handle('db:invoices:delete', (_, id: string) => deleteInvoice(id))
     ipcMain.handle('db:invoices:mark-paid', (_, id: string) => markAsPaid(id))
     ipcMain.handle('db:invoices:mark-cancelled', (_, id: string) => markAsCancelled(id))
-    ipcMain.handle('db:invoices:resolve-conflict', (_, id: string, data: any) => resolveInvoiceConflict(id, data))
 
-    // Conflict resolution for other entities
-    ipcMain.handle('db:clients:resolve-conflict', (_, id: string, data: any) => resolveClientConflict(id, data))
-    ipcMain.handle('db:signatures:resolve-conflict', (_, id: string, data: any) => resolveSignatureConflict(id, data))
-    ipcMain.handle('db:payment-profiles:resolve-conflict', (_, id: string, data: any) => resolvePaymentProfileConflict(id, data))
-    ipcMain.handle('db:email-templates:resolve-conflict', (_, id: string, data: any) => resolveEmailTemplateConflict(id, data))
+
+    // Conflict resolution removed (Silent Server-Wins)
+
 
     // Client handlers
     ipcMain.handle('db:clients:list', () => getClients())
@@ -194,6 +195,7 @@ export function registerIpcHandlers(): void {
 
     // Google Auth
     ipcMain.handle('google:is-connected', () => isGoogleConnected())
+    ipcMain.handle('google:get-profile', () => getUserProfile())
     ipcMain.handle('google:has-custom-credentials', () => hasCustomCredentials())
     ipcMain.handle('google:get-auth-url', () => getAuthUrl())
     ipcMain.handle('google:connect', async () => {
@@ -219,10 +221,13 @@ export function registerIpcHandlers(): void {
         disconnectGoogle()
         return true
     })
-    ipcMain.handle('google:disconnect', () => {
-        disconnectGoogle()
-        return true
+    ipcMain.handle('db:invoices:get-revenue-data', () => {
+        // Placeholder for future revenue charts
+        return []
     })
+
+    // Reports
+    ipcMain.handle('db:reports:received-by-month', () => getReceivedByMonth())
 
     // Drive Sync — syncs ALL entity tables through the universal generic engine
     ipcMain.handle('drive:sync', async () => {
@@ -254,4 +259,17 @@ export function registerIpcHandlers(): void {
     })
     ipcMain.handle('outbox:list', () => getOutboxItems())
     ipcMain.handle('outbox:get-pending-count', () => getPendingOutboxCount())
+
+    // Locking handlers
+    ipcMain.handle('sync:lock', (_, uuid: string, userId: string) => lockInvoice(uuid, userId, getDeviceId()))
+    ipcMain.handle('sync:unlock', (_, uuid: string) => unlockInvoice(uuid))
+    ipcMain.handle('sync:is-locked', (_, uuid: string, userId: string) => isInvoiceLocked(uuid, userId, getDeviceId()))
+
+
+    // Logout and cleanup
+    ipcMain.handle('auth:logout', async () => {
+        await disconnectGoogle()
+        wipeLocalData()
+        return true
+    })
 }

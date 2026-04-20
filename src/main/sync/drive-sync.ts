@@ -12,6 +12,7 @@ import * as zlib from 'zlib'
 const APP_FOLDER_NAME = 'PrismInvoice-Data'
 let appFolderId: string | null = null
 let syncInterval: NodeJS.Timeout | null = null;
+const LOCK_PREFIX = 'lock-'
 
 export function startPeriodicSync() {
     if (syncInterval) clearInterval(syncInterval)
@@ -34,8 +35,8 @@ export function startPeriodicSync() {
     syncInterval = setInterval(runAll, 30 * 60 * 1000)
 }
 
-export async function pushSingleRecordToDrive(tableName: string, localRecord: any, primaryKey: string = 'uuid'): Promise<void> {
-    if (!localRecord || localRecord.has_conflict) return;
+export async function pushSingleRecordToDrive(tableName: string, localRecord: any, primaryKey: string = 'uuid', throwOnError: boolean = false): Promise<void> {
+    if (!localRecord) return;
 
     try {
         const folderId = await getOrCreateAppFolder()
@@ -73,7 +74,8 @@ export async function pushSingleRecordToDrive(tableName: string, localRecord: an
         
         getDatabase().prepare(`UPDATE ${tableName} SET last_synced_at = ? WHERE ${primaryKey} = ?`).run(localRecord.updated_at, id)
     } catch (e: any) {
-        console.error(`Silent delta-push failed for ${tableName}-${localRecord?.[primaryKey]}:`, e.message)
+        console.error(`Push failed for ${tableName}-${localRecord?.[primaryKey]}:`, e.message)
+        if (throwOnError) throw e
     }
 }
 
@@ -155,30 +157,19 @@ export async function syncTableToDrive(tableName: string, primaryKey: string = '
                     synced++
                     localMap.set(id, db.prepare(`SELECT * FROM ${tableName} WHERE ${primaryKey}=?`).get(id))
                 } else {
-                    if (localRec.updated_at > localRec.last_synced_at) {
-                        const localClone = { ...localRec, has_conflict: undefined, conflict_data: undefined, last_synced_at: undefined, updated_at: undefined }
-                        const remoteClone = { ...remoteData, has_conflict: undefined, conflict_data: undefined, last_synced_at: undefined, updated_at: undefined }
-                        if (JSON.stringify(localClone) !== JSON.stringify(remoteClone)) {
-                            console.log(`Conflict detected for ${tableName} ${id}`)
-                            db.prepare(`UPDATE ${tableName} SET has_conflict = 1, conflict_data = ? WHERE ${primaryKey} = ?`).run(JSON.stringify(remoteData), id)
-                            synced++
-                        } else {
-                            db.prepare(`UPDATE ${tableName} SET last_synced_at = ? WHERE ${primaryKey} = ?`).run(localRec.updated_at, id)
-                        }
-                    } else {
-                        const updates = Object.keys(remoteData).map(k => `${k} = ?`).join(', ')
-                        const vals = Object.values(remoteData)
-                        db.prepare(`UPDATE ${tableName} SET ${updates}, has_conflict = 0, conflict_data = NULL, last_synced_at = ? WHERE ${primaryKey} = ?`).run(...vals, remoteData.updated_at, id)
-                        synced++
-                    }
+                    // SILENT SERVER-WINS: Update local record with remote data
+                    const updates = Object.keys(remoteData).map(k => `${k} = ?`).join(', ')
+                    const vals = Object.values(remoteData)
+                    db.prepare(`UPDATE ${tableName} SET ${updates}, has_conflict = 0, conflict_data = NULL, last_synced_at = ? WHERE ${primaryKey} = ?`).run(...vals, remoteData.updated_at, id)
+                    synced++
                     localMap.set(id, db.prepare(`SELECT * FROM ${tableName} WHERE ${primaryKey}=?`).get(id))
                 }
+
             } catch (e: any) { errors.push(`Download failed ${id}: ${e.message}`) }
         }
     }
 
     for (const [id, localRec] of localMap) {
-        if (localRec.has_conflict) continue
         const remoteFile = remoteMap.get(id)
         if (!remoteFile || localRec.updated_at > (localRec.last_synced_at || 0)) {
             await pushSingleRecordToDrive(tableName, localRec, primaryKey)
@@ -233,4 +224,79 @@ export async function uploadPDFToDrive(
     })
 
     return res.data.id!
+}
+
+
+
+
+export async function lockInvoice(uuid: string, userId: string, deviceId: string): Promise<void> {
+    const folderId = await getOrCreateAppFolder()
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const fileName = `${LOCK_PREFIX}invoices-${uuid}.json`
+
+    const content = JSON.stringify({ userId, deviceId, timestamp: Date.now() })
+    const { Readable } = require('stream')
+    const stream = new Readable()
+    stream.push(content)
+    stream.push(null)
+
+    await drive.files.create({
+        requestBody: { name: fileName, parents: [folderId] },
+        media: { mimeType: 'application/json', body: stream }
+    })
+}
+
+
+export async function unlockInvoice(uuid: string): Promise<void> {
+    const folderId = await getOrCreateAppFolder()
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const fileName = `${LOCK_PREFIX}invoices-${uuid}.json`
+
+    const res = await drive.files.list({
+        q: `'${folderId}' in parents and name = '${fileName}' and trashed=false`,
+        fields: 'files(id)'
+    })
+    
+    if (res.data.files && res.data.files.length > 0) {
+        await drive.files.delete({ fileId: res.data.files[0].id! })
+    }
+}
+
+export async function isInvoiceLocked(uuid: string, currentUserId: string, currentDeviceId: string): Promise<{ locked: boolean, byMe: boolean }> {
+    const folderId = await getOrCreateAppFolder()
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const fileName = `${LOCK_PREFIX}invoices-${uuid}.json`
+
+    const res = await drive.files.list({
+        q: `'${folderId}' in parents and name = '${fileName}' and trashed=false`,
+        fields: 'files(id, name)'
+    })
+
+    if (!res.data.files || res.data.files.length === 0) return { locked: false, byMe: false }
+
+    try {
+        const downloadRes = await drive.files.get({ fileId: res.data.files[0].id!, alt: 'media' })
+        const data = downloadRes.data as any
+        return { 
+            locked: true, 
+            byMe: data.userId === currentUserId || data.deviceId === currentDeviceId
+        }
+    } catch (e) {
+        return { locked: true, byMe: false }
+    }
+}
+
+
+export function wipeLocalData() {
+    const db = getDatabase()
+    const tables = ['invoices', 'clients', 'signatures', 'payment_profiles', 'email_templates', 'outbox', 'seller_info']
+    db.transaction(() => {
+        for (const table of tables) {
+            try { db.prepare(`DELETE FROM ${table}`).run() } catch(e){}
+        }
+    })()
+    appFolderId = null
 }

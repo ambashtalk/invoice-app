@@ -11,21 +11,49 @@ export interface EmailTemplate {
     last_synced_at?: number
     has_conflict?: number
     conflict_data?: string | null
+    /** true for the built-in system template — cannot be deleted or set as default */
+    is_system?: boolean
+}
+
+/**
+ * Built-in system template — always available, cannot be deleted.
+ * Stored in code, not in the database, so it survives DB wipes.
+ */
+export const SYSTEM_TEMPLATE: EmailTemplate = {
+    id: '__system_standard_invoice__',
+    name: '📄 Standard Invoice (System)',
+    subject: 'Invoice {{invoice_no}} from {{seller_name}}',
+    body: [
+        '<p>Dear {{client_name}},</p>',
+        '<p>Please find attached <strong>Invoice {{invoice_no}}</strong> for ',
+        '<strong>{{total_amount}} {{currency}}</strong>.</p>',
+        '<p>Kindly process the payment at your earliest convenience.</p>',
+        '<p>If you have any questions or concerns, do not hesitate to reach out.</p>',
+        '<p>Thank you for your business!</p>',
+        '<p>Warm regards,<br/>{{seller_name}}</p>'
+    ].join('\n'),
+    is_default: 0,
+    is_system: true
 }
 
 export function getEmailTemplates(): EmailTemplate[] {
     const db = getDatabase()
-    return db.prepare('SELECT * FROM email_templates ORDER BY name ASC').all() as EmailTemplate[]
+    const rows = db.prepare('SELECT * FROM email_templates ORDER BY name ASC').all() as EmailTemplate[]
+    // System template always appears first
+    return [SYSTEM_TEMPLATE, ...rows]
 }
 
 export function getEmailTemplate(id: string): EmailTemplate | null {
+    if (id === SYSTEM_TEMPLATE.id) return SYSTEM_TEMPLATE
     const db = getDatabase()
     return db.prepare('SELECT * FROM email_templates WHERE id = ?').get(id) as EmailTemplate | null
 }
 
 export function getDefaultEmailTemplate(): EmailTemplate | null {
     const db = getDatabase()
-    return db.prepare('SELECT * FROM email_templates WHERE is_default = 1').get() as EmailTemplate | null
+    const row = db.prepare('SELECT * FROM email_templates WHERE is_default = 1').get() as EmailTemplate | null
+    // Fall back to system template if no user-defined default exists
+    return row ?? SYSTEM_TEMPLATE
 }
 
 export function createEmailTemplate(data: Omit<EmailTemplate, 'id' | 'is_default' | 'updated_at' | 'last_synced_at' | 'has_conflict' | 'conflict_data'>): EmailTemplate {
@@ -65,12 +93,14 @@ export function updateEmailTemplate(id: string, data: Partial<Omit<EmailTemplate
 }
 
 export function deleteEmailTemplate(id: string): boolean {
+    if (id === SYSTEM_TEMPLATE.id) return false  // system template cannot be deleted
     const db = getDatabase()
     const result = db.prepare('DELETE FROM email_templates WHERE id = ? AND is_default = 0').run(id)
     return result.changes > 0
 }
 
 export function setDefaultEmailTemplate(id: string): boolean {
+    if (id === SYSTEM_TEMPLATE.id) return false  // system template cannot be set as DB default
     const db = getDatabase()
     const now = Date.now()
 
@@ -81,18 +111,4 @@ export function setDefaultEmailTemplate(id: string): boolean {
     })
 
     return transaction()
-}
-
-export function resolveEmailTemplateConflict(id: string, resolvedData: any): EmailTemplate {
-    const db = getDatabase()
-    db.prepare(`
-        UPDATE email_templates SET
-        name = ?, subject = ?, body = ?, updated_at = ?,
-        has_conflict = 0, conflict_data = NULL, last_synced_at = 0
-        WHERE id = ?
-    `).run(resolvedData.name, resolvedData.subject, resolvedData.body, Date.now(), id)
-
-    const resolved = getEmailTemplate(id)!
-    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('email_templates', resolved, 'id')).catch(() => {})
-    return resolved
 }

@@ -1,11 +1,13 @@
 import { numberToWords, formatIndianNumber } from '../../shared/utils/numbers-to-words'
-import { calculateTax } from '../../shared/utils/tax-calculator'
+import { calculateInvoiceTax } from '../../shared/utils/tax-calculator'
 import './InvoicePreview.css'
 
 interface LineItem {
     slNo: number
     description: string
     amount: number
+    tax_rate?: number
+    show_sgst_cgst?: boolean
 }
 
 interface Client {
@@ -81,7 +83,7 @@ export default function InvoicePreview({
     signature,
     sellerInfo
 }: InvoicePreviewProps) {
-    const taxBreakdown = calculateTax(invoice.total_amount, invoice.tax_rate)
+    const taxBreakdown = calculateInvoiceTax(invoice.items)
     const dueDate = invoice.scheduled_at
         ? new Date(invoice.scheduled_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
         : formatDate(invoice.created_at ? invoice.created_at + 30 * 24 * 60 * 60 * 1000 : undefined)
@@ -155,7 +157,15 @@ export default function InvoicePreview({
                     {invoice.items.map((item) => (
                         <tr key={item.slNo}>
                             <td className="col-sl">{item.slNo}</td>
-                            <td className="col-desc">{item.description}</td>
+                            <td className="col-desc">
+                                <div>{item.description}</div>
+                                {item.show_sgst_cgst && item.tax_rate && item.tax_rate > 0 && (
+                                    <div style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>
+                                        CGST ({(item.tax_rate * 50).toFixed(1)}%): {formatCurrency(taxBreakdown.items.find(it => it.description === item.description)?.cgstAmount || 0, invoice.currency)} | 
+                                        SGST ({(item.tax_rate * 50).toFixed(1)}%): {formatCurrency(taxBreakdown.items.find(it => it.description === item.description)?.sgstAmount || 0, invoice.currency)}
+                                    </div>
+                                )}
+                            </td>
                             <td className="col-amount">{formatCurrency(item.amount, invoice.currency)}</td>
                         </tr>
                     ))}
@@ -182,10 +192,27 @@ export default function InvoicePreview({
                         <span className="amount-label">Base Amount</span>
                         <span className="amount-value">{formatCurrency(taxBreakdown.baseAmount, invoice.currency)}</span>
                     </div>
-                    <div className="amount-row">
-                        <span className="amount-label">Tax ({(invoice.tax_rate * 100).toFixed(0)}% GST)</span>
-                        <span className="amount-value">{formatCurrency(taxBreakdown.taxAmount, invoice.currency)}</span>
-                    </div>
+                    {Object.entries(taxBreakdown.aggregateByRate).map(([rate, data]: [string, any]) => (
+                        <div key={rate}>
+                            {data.sgst !== undefined ? (
+                                <>
+                                    <div className="amount-row">
+                                        <span className="amount-label">CGST ({(parseFloat(rate) * 50).toFixed(1)}%)</span>
+                                        <span className="amount-value">{formatCurrency(data.cgst, invoice.currency)}</span>
+                                    </div>
+                                    <div className="amount-row">
+                                        <span className="amount-label">SGST ({(parseFloat(rate) * 50).toFixed(1)}%)</span>
+                                        <span className="amount-value">{formatCurrency(data.sgst, invoice.currency)}</span>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="amount-row">
+                                    <span className="amount-label">Tax ({(parseFloat(rate) * 100).toFixed(0)}% GST)</span>
+                                    <span className="amount-value">{formatCurrency(data.tax, invoice.currency)}</span>
+                                </div>
+                            )}
+                        </div>
+                    ))}
                     <div className="amount-row total-row">
                         <span className="amount-label">Total Amount</span>
                         <span className="amount-value total-value">{formatCurrency(invoice.total_amount, invoice.currency)}</span>

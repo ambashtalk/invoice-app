@@ -58,7 +58,7 @@ export default function InvoicePDF() {
     const [paymentProfile, setPaymentProfile] = useState<any>(null)
     const [signature, setSignature] = useState<any>(null)
     const [sellerInfo, setSellerInfo] = useState<any>(null)
-    const [loading, setLoading] = useState(true)
+    const [dataReady, setDataReady] = useState(false)
     const [exporting, setExporting] = useState(false)
 
     const [emailTemplates, setEmailTemplates] = useState<any[]>([])
@@ -202,8 +202,7 @@ export default function InvoicePDF() {
         }
     }, [invoice, client, sellerInfo, emailTemplates, hasInitializedForm, pendingDispatch])
 
-    async function loadAll(invoiceId: string, showLoading = false) {
-        if (showLoading) setLoading(true)
+    async function loadAll(invoiceId: string, _showLoading = false) {
         try {
             const [inv, outbox, profiles, sigs, seller, templates] = await Promise.all([
                 window.electronAPI.getInvoice(invoiceId),
@@ -215,16 +214,18 @@ export default function InvoicePDF() {
             ])
 
             if (!inv) {
+                error('Invoice not found.')
                 navigate('/')
                 return
             }
 
-            const parsed = { ...inv, items: typeof inv.items === 'string' ? JSON.parse(inv.items) : inv.items }
+            const items = typeof inv.items === 'string' ? JSON.parse(inv.items) : (inv.items || [])
+            const parsed = { ...inv, items }
             setInvoice(parsed)
+
             setSellerInfo(seller)
             setEmailTemplates(templates)
 
-            // Find current pending dispatch if any
             const pending = outbox.find((o: any) => o.invoice_id === invoiceId && o.status === 'PENDING')
             setPendingDispatch(pending || null)
 
@@ -234,13 +235,17 @@ export default function InvoicePDF() {
             setSignature(sigs[0] || null)
 
             if (inv.client_id) {
-                const clientData = await window.electronAPI.getClient(inv.client_id)
-                setClient(clientData)
+                try {
+                    const clientData = await window.electronAPI.getClient(inv.client_id)
+                    setClient(clientData)
+                } catch {
+                    // non-fatal: preview renders without client name
+                }
             }
-        } catch (error) {
-            console.error('Failed to load invoice:', error)
+        } catch (err: any) {
+            error(err?.message || 'Failed to load invoice preview.')
         } finally {
-            if (showLoading) setLoading(false)
+            setDataReady(true)
         }
     }
 
@@ -321,9 +326,8 @@ export default function InvoicePDF() {
         }
     }
 
-    if (loading || !invoice) {
-        return <div className="empty-state"><p className="empty-state-description">Loading preview...</p></div>
-    }
+    // No full-page block — page chrome renders immediately
+    const isLoadingData = !dataReady
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -332,7 +336,7 @@ export default function InvoicePDF() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <h1 className="page-title" style={{ margin: 0 }}>Invoice Preview</h1>
-                            <span className={`badge badge-${invoice.status.toLowerCase()}`} style={{ verticalAlign: 'middle' }}>{invoice.status}</span>
+                            {invoice && <span className={`badge badge-${invoice.status.toLowerCase()}`} style={{ verticalAlign: 'middle' }}>{invoice.status}</span>}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                             {invoice?.invoice_no && <span className="card-meta" style={{ fontWeight: 600, color: 'var(--color-accent)' }}>{invoice.invoice_no}</span>}
@@ -344,40 +348,40 @@ export default function InvoicePDF() {
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <button type="button" onClick={handleBack} className="btn btn-ghost" style={{ padding: '0 12px' }} title="Return to Previous Page">←</button>
                         
-                        {(invoice.status === 'DRAFT') && (
-                            <button onClick={() => navigate(`/invoices/${id}/edit`)} className="btn btn-secondary" title="Edit line items and details">
+                        {(invoice?.status === 'DRAFT') && (
+                            <button onClick={() => navigate(`/invoices/${id}/edit`)} className="btn btn-secondary" title="Edit line items and details" disabled={isLoadingData}>
                                 Edit
                             </button>
                         )}
                         
-                        <button onClick={handleExportPDF} className="btn btn-secondary" disabled={exporting}>
+                        <button onClick={handleExportPDF} className="btn btn-secondary" disabled={exporting || isLoadingData}>
                             {exporting ? 'Exporting...' : 'Export PDF'}
                         </button>
 
-                        {invoice.status === 'DRAFT' && (
+                        {invoice?.status === 'DRAFT' && (
                             <>
-                                <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-secondary" title="Set dispatch date and time">
+                                <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-secondary" title="Set dispatch date and time" disabled={isLoadingData}>
                                     <IconCalendar /> Schedule
                                 </button>
-                                <button onClick={() => setShowSchedulePanel(true)} className="btn btn-primary" title="Send email now via Gmail">
+                                <button onClick={() => setShowSchedulePanel(true)} className="btn btn-primary" title="Send email now via Gmail" disabled={isLoadingData}>
                                     <IconSend /> Send Now
                                 </button>
                             </>
                         )}
 
-                        {invoice.status === 'SCHEDULED' && (
+                        {invoice?.status === 'SCHEDULED' && (
                             <>
-                                <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-primary" title="Update dispatch date and time">
+                                <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-primary" title="Update dispatch date and time" disabled={isLoadingData}>
                                     <IconCalendar /> Modify Schedule
                                 </button>
-                                <button onClick={() => handleCancelSchedule(true)} className="btn btn-ghost" style={{ color: 'var(--color-error)' }} title="Remove from outbox and revert to Draft">
+                                <button onClick={() => handleCancelSchedule(true)} className="btn btn-ghost" style={{ color: 'var(--color-error)' }} title="Remove from outbox and revert to Draft" disabled={isLoadingData}>
                                     <IconTrash /> Cancel Schedule
                                 </button>
                             </>
                         )}
 
-                        {invoice.status === 'SENT' && (
-                            <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-primary" title="Send again to the same recipient">
+                        {invoice?.status === 'SENT' && (
+                            <button onClick={() => setShowSchedulePanel(p => !p)} className="btn btn-primary" title="Send again to the same recipient" disabled={isLoadingData}>
                                 <IconResend /> Resend
                             </button>
                         )}
@@ -385,7 +389,14 @@ export default function InvoicePDF() {
                 </div>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', background: 'var(--color-bg-dark)', padding: 'var(--spacing-xl)' }}>
+            <div style={{ 
+                flex: 1, 
+                overflowY: 'auto', 
+                background: 'var(--color-bg-dark)', 
+                padding: 'var(--spacing-xl)',
+                position: 'relative'
+            }}>
+                {isLoadingData && <div className="page-loader-bar" />}
                 <div style={{ maxWidth: '900px', margin: '0 auto' }}>
                     {showSchedulePanel && (
                         <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)', borderRadius: '16px', padding: '24px', marginBottom: '24px', backdropFilter: 'blur(10px)', position: 'relative', zIndex: 100 }}>
@@ -440,13 +451,28 @@ export default function InvoicePDF() {
 
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                         <div style={{ boxShadow: '0 10px 40px rgba(0,0,0,0.15)', background: 'white', borderRadius: '4px', overflow: 'hidden' }}>
-                            <InvoicePreview
-                                invoice={{ ...invoice, client_id: invoice.client_id ?? undefined, scheduled_at: invoice.scheduled_at ?? undefined }}
-                                client={client}
-                                paymentProfile={paymentProfile}
-                                signature={signature}
-                                sellerInfo={sellerInfo}
-                            />
+                            {invoice ? (
+                                <InvoicePreview
+                                    invoice={{ ...invoice, client_id: invoice.client_id ?? undefined, scheduled_at: invoice.scheduled_at ?? undefined }}
+                                    client={client}
+                                    paymentProfile={paymentProfile}
+                                    signature={signature}
+                                    sellerInfo={sellerInfo}
+                                />
+                            ) : (
+                                <div style={{ 
+                                    width: '794px', 
+                                    minHeight: '500px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: '#aaa',
+                                    fontSize: '14px',
+                                    background: 'white'
+                                }}>
+                                    Loading preview...
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

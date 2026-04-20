@@ -6,7 +6,10 @@ import { google } from 'googleapis'
 
 const SCOPES = [
     'https://www.googleapis.com/auth/gmail.send',
-    'https://www.googleapis.com/auth/drive.file'
+    'https://www.googleapis.com/auth/drive.file',
+    'openid',
+    'email',
+    'profile'
 ]
 
 const TOKENS_FILE = join(app.getPath('userData'), 'google-tokens.enc')
@@ -214,4 +217,11 @@ export function disconnectGoogle(): void {
     } catch (e) {
         console.warn('Failed to disconnect Google:', e)
     }
+}
+
+export async function getUserProfile() {
+    const auth = getOAuth2Client()
+    const oauth2 = google.oauth2({ version: 'v2', auth })
+    const res = await oauth2.userinfo.get()
+    return res.data
 }

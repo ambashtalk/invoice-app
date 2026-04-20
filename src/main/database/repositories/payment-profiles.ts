@@ -107,26 +107,3 @@ export function setDefaultPaymentProfile(id: string): PaymentProfile | null {
 
     return getPaymentProfile(id)
 }
-
-export function resolvePaymentProfileConflict(id: string, resolvedData: any): PaymentProfile {
-    const db = getDatabase()
-    db.prepare(`
-        UPDATE payment_profiles SET
-        beneficiary_name = ?, bank_name = ?, account_type = ?,
-        branch = ?, ifsc_code = ?, account_number = ?, updated_at = ?,
-        has_conflict = 0, conflict_data = NULL, last_synced_at = 0
-        WHERE id = ?
-    `).run(
-        resolvedData.beneficiary_name,
-        resolvedData.bank_name,
-        resolvedData.account_type || 'Savings Account',
-        resolvedData.branch || null,
-        resolvedData.ifsc_code || null,
-        resolvedData.account_number,
-        Date.now(),
-        id
-    )
-    const resolved = getPaymentProfile(id)!
-    import('../../sync/drive-sync').then(m => m.pushSingleRecordToDrive('payment_profiles', resolved, 'id')).catch(() => {})
-    return resolved
-}
